@@ -1,0 +1,42 @@
+{
+	"name": "dxcode-cli",
+	"version": "1.0.0",
+	"description": "DX Encoding CLI - 命令行编码解码工具",
+	"bin": {
+		"dxc": "./index.js"
+	},
+	"main": "index.js",
+	"files": [
+		"index.js"
+	],
+	"scripts": {
+		"test": "echo 'CLI test'"
+	},
+	"keywords": [
+		"dx",
+		"dxcode",
+		"encoding",
+		"decoding",
+		"base64",
+		"cli",
+		"dogxi",
+		"binary",
+		"text"
+	],
+	"author": "Dogxi",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/dogxii/dxcode.git"
+	},
+	"bugs": {
+		"url": "https://github.com/dogxii/dxcode/issues"
+	},
+	"homepage": "https://dxc.dogxi.me",
+	"engines": {
+		"node": ">=12.0.0"
+	},
+	"dependencies": {
+		"dxcode": "^1.0.0"
+	}
+}

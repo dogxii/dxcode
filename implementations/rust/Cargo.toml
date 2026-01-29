@@ -1,0 +1,29 @@
+[package]
+name = "dxcode"
+version = "1.0.0"
+edition = "2021"
+authors = ["Dogxi"]
+description = "DX 编码算法 - 由 Dogxi 创造的独特编码方案"
+license = "MIT"
+repository = "https://github.com/dogxii/dxcode"
+homepage = "https://dxc.dogxi.me"
+documentation = "https://docs.rs/dxcode"
+readme = "README.md"
+keywords = ["dx", "dxcode", "encoding", "decoding", "base64", "dogxi"]
+categories = ["encoding", "no-std"]
+
+[lib]
+name = "dxcode"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dxc"
+path = "src/main.rs"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+
+[dev-dependencies]

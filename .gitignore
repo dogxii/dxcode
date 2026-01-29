@@ -1,0 +1,107 @@
+# 依赖目录
+node_modules/
+vendor/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 构建输出
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+target/
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.o
+*.obj
+
+# IDE 和编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
+.spyproject
+
+# 操作系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# 环境变量和配置
+.env
+.env.local
+.env.*.local
+*.local
+
+# 日志文件
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 测试覆盖率
+coverage/
+.coverage
+htmlcov/
+.nyc_output/
+*.cover
+
+# SvelteKit / Vite
+web/.svelte-kit/
+web/build/
+
+# Rust
+implementations/rust/target/
+implementations/rust/Cargo.lock
+
+# Go
+implementations/go/go.sum
+
+# C
+implementations/c/*.o
+implementations/c/*.exe
+implementations/c/dx_encoding
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# 打包文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 证书和密钥（安全起见）
+*.pem
+*.key
+*.crt
+*.p12

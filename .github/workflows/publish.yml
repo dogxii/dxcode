@@ -1,0 +1,150 @@
+name: Publish Packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.0.0)'
+        required: true
+
+jobs:
+  # 发布 npm 主库 (dxcode)
+  publish-npm-lib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies and test
+        working-directory: implementations/javascript
+        run: |
+          npm install
+          npm test
+
+      - name: Publish to npm
+        working-directory: implementations/javascript
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # 发布 npm CLI (dxcode-cli)
+  publish-npm-cli:
+    runs-on: ubuntu-latest
+    needs: publish-npm-lib
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Wait for npm registry to update
+        run: sleep 30
+
+      - name: Publish CLI to npm
+        working-directory: implementations/javascript/cli
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # 发布 PyPI (dxcode)
+  publish-pypi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        working-directory: implementations/python
+        run: |
+          rm -rf dist/ build/ *.egg-info/
+          python -m build
+
+      - name: Publish to PyPI
+        working-directory: implementations/python
+        run: twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+  # 发布 Crates.io (dxcode)
+  publish-crates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        working-directory: implementations/rust
+        run: cargo publish --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+  # 更新 Homebrew tap
+  update-homebrew:
+    runs-on: ubuntu-latest
+    needs: publish-npm-cli
+    if: github.event_name == 'release'
+    steps:
+      - name: Wait for npm registry
+        run: sleep 60
+
+      - uses: actions/checkout@v4
+        with:
+          repository: dogxi/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+
+          echo "Updating to version ${VERSION}"
+
+          # Get SHA256 of npm tarball
+          SHA256=$(curl -sL "https://registry.npmjs.org/dxcode-cli/-/dxcode-cli-${VERSION}.tgz" | shasum -a 256 | cut -d' ' -f1)
+
+          echo "SHA256: ${SHA256}"
+
+          cd homebrew-tap
+
+          # Update formula
+          sed -i "s|url \".*\"|url \"https://registry.npmjs.org/dxcode-cli/-/dxcode-cli-${VERSION}.tgz\"|" dxcode-cli.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" dxcode-cli.rb
+
+      - name: Commit and push
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add dxcode-cli.rb
+          git diff --staged --quiet || git commit -m "Update dxcode-cli to ${{ github.event.release.tag_name }}"
+          git push
+
+  # 部署网站到 Vercel (可选，如果没有自动部署)
+  # deploy-website:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: amondnet/vercel-action@v25
+  #       with:
+  #         vercel-token: ${{ secrets.VERCEL_TOKEN }}
+  #         vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+  #         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+  #         working-directory: ./web
+  #         vercel-args: '--prod'

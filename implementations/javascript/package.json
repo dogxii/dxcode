@@ -1,0 +1,47 @@
+{
+	"name": "dxcode",
+	"version": "1.0.0",
+	"description": "DX 编码算法 - 由 Dogxi 创造的独特编码方案",
+	"main": "dxcode.js",
+	"module": "dxcode.mjs",
+	"types": "dxcode.d.ts",
+	"exports": {
+		".": {
+			"import": "./dxcode.mjs",
+			"require": "./dxcode.js",
+			"types": "./dxcode.d.ts"
+		}
+	},
+	"files": [
+		"dxcode.js",
+		"dxcode.mjs",
+		"dxcode.d.ts"
+	],
+	"scripts": {
+		"test": "node test.js",
+		"build": "echo 'No build step required'"
+	},
+	"keywords": [
+		"dx",
+		"dxcode",
+		"encoding",
+		"decoding",
+		"base64",
+		"dogxi",
+		"binary",
+		"text"
+	],
+	"author": "Dogxi",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/dogxii/dxcode.git"
+	},
+	"bugs": {
+		"url": "https://github.com/dogxii/dxcode/issues"
+	},
+	"homepage": "https://dxc.dogxi.me",
+	"engines": {
+		"node": ">=12.0.0"
+	}
+}
