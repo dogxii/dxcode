@@ -1,6 +1,9 @@
 name: Publish Packages
 
 on:
+  push:
+    tags:
+      - 'v*'
   release:
     types: [published]
   workflow_dispatch:
@@ -13,10 +16,75 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # 自动创建 Release（仅在推送 tag 时触发）
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    outputs:
+      release_id: ${{ steps.create_release.outputs.id }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # 简单的 changelog 生成
+          echo "## What's Changed" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### DX Encoding v${{ steps.version.outputs.version }}" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "A distinctive, URL-safe binary encoder with the signature \`dx\` prefix." >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Installation" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "\`\`\`bash" >> CHANGELOG.md
+          echo "# Homebrew (macOS/Linux)" >> CHANGELOG.md
+          echo "brew install dogxii/tap/dxcode" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "# Cargo" >> CHANGELOG.md
+          echo "cargo install dxcode" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "# curl" >> CHANGELOG.md
+          echo "curl -fsSL https://dxc.dogxi.me/install.sh | sh" >> CHANGELOG.md
+          echo "\`\`\`" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Downloads" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "Pre-built binaries are available below for:" >> CHANGELOG.md
+          echo "- macOS (Apple Silicon & Intel)" >> CHANGELOG.md
+          echo "- Linux (x86_64, arm64, armv7)" >> CHANGELOG.md
+          echo "- Windows (x86_64)" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "**Full Changelog**: https://github.com/dogxii/dxcode/commits/v${{ steps.version.outputs.version }}" >> CHANGELOG.md
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # 构建 Rust 预编译二进制
   build-rust-binaries:
     name: Build Rust binary (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    needs: create-release
+    if: always() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:
@@ -140,8 +208,8 @@ jobs:
   upload-release-assets:
     name: Upload release assets
     runs-on: ubuntu-latest
-    needs: build-rust-binaries
-    if: github.event_name == 'release'
+    needs: [create-release, build-rust-binaries]
+    if: always() && needs.build-rust-binaries.result == 'success' && (github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))
     permissions:
       contents: write
     steps:
@@ -256,12 +324,16 @@ jobs:
     name: Update Homebrew tap
     runs-on: macos-latest
     needs: upload-release-assets
-    if: github.event_name == 'release'
+    if: always() && needs.upload-release-assets.result == 'success'
     steps:
       - name: Get release info
         id: release
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
           VERSION="${VERSION#v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
