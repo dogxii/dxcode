@@ -1,141 +1,95 @@
-# Homebrew Tap for dxcode CLI
+# DXCode Homebrew Tap
 
-这是 dxcode CLI 的 Homebrew tap 仓库配置。
+DX Encoding CLI 的 Homebrew 安装配方。
 
-## 安装方法
+## 安装
 
-### 方法一：添加 tap 后安装
+### 推荐方式 (原生 Rust 二进制)
 
 ```bash
-brew tap dogxi/tap
-brew install dxcode-cli
+brew tap dogxii/tap
+brew install dxcode
 ```
 
-### 方法二：一行命令安装
+或一行命令：
 
 ```bash
-brew install dogxi/tap/dxcode-cli
+brew install dogxii/tap/dxcode
+```
+
+### 备选方式 (Node.js 版本)
+
+如果你更偏好 Node.js 版本：
+
+```bash
+brew install dogxii/tap/dxcode-cli
+```
+
+## 性能对比
+
+| 版本                 | 启动时间 | 内存占用 | 依赖    |
+| -------------------- | -------- | -------- | ------- |
+| Rust (dxcode)        | ~2ms     | ~1MB     | 无      |
+| Node.js (dxcode-cli) | ~150ms   | ~30MB    | Node.js |
+
+**强烈推荐使用 Rust 版本**，它是原生编译的二进制文件，启动更快、内存占用更低、无需任何运行时依赖。
+
+## 使用
+
+```bash
+# 编码
+dxc encode "Hello World"
+
+# 解码
+dxc decode "dxQBpXYYdBsRzxnRCLk="
+
+# 检查是否为有效的 DX 编码
+dxc check "dxQBpXYYdBsRzxnRCLk="
+
+# 显示编码信息
+dxc info
+
+# 查看帮助
+dxc --help
+
+# 查看版本
+dxc --version
+```
+
+## 管道支持
+
+```bash
+echo "Hello" | dxc encode
+echo "dxQBpXYYdV==" | dxc decode
+cat file.txt | dxc encode > encoded.txt
 ```
 
 ## 更新
 
 ```bash
 brew update
-brew upgrade dxcode-cli
+brew upgrade dxcode
 ```
 
 ## 卸载
 
 ```bash
-brew uninstall dxcode-cli
-brew untap dogxi/tap  # 可选：移除 tap
+brew uninstall dxcode
+brew untap dogxii/tap  # 可选：移除 tap
 ```
 
-## 设置自己的 Homebrew Tap
+## 文件说明
 
-如果你想维护自己的 tap，请按照以下步骤操作：
-
-### 1. 创建 tap 仓库
-
-在 GitHub 上创建一个名为 `homebrew-tap` 的仓库（必须以 `homebrew-` 开头）。
-
-```bash
-# 仓库名格式: username/homebrew-tap
-# 用户安装时使用: brew tap username/tap
-```
-
-### 2. 复制 formula 文件
-
-将 `dxcode-cli.rb` 复制到你的 tap 仓库根目录：
-
-```
-homebrew-tap/
-├── dxcode-cli.rb
-└── README.md
-```
-
-### 3. 更新 SHA256 哈希
-
-发布 npm 包后，获取 tarball 的 SHA256：
-
-```bash
-# 方法一：从 npm 获取
-curl -sL https://registry.npmjs.org/dxcode-cli/-/dxcode-cli-1.0.0.tgz | shasum -a 256
-
-# 方法二：使用 npm pack
-cd implementations/javascript/cli
-npm pack
-shasum -a 256 dxcode-cli-1.0.0.tgz
-```
-
-然后更新 `dxcode-cli.rb` 中的 `sha256` 字段。
-
-### 4. 测试 formula
-
-```bash
-# 本地测试
-brew install --build-from-source ./dxcode-cli.rb
-
-# 审计
-brew audit --strict dxcode-cli.rb
-
-# 测试
-brew test dxcode-cli
-```
-
-### 5. 提交并推送
-
-```bash
-git add dxcode-cli.rb
-git commit -m "Add dxcode-cli formula v1.0.0"
-git push
-```
-
-## 自动更新（可选）
-
-可以设置 GitHub Actions 在发布新版本时自动更新 formula：
-
-```yaml
-# .github/workflows/update-homebrew.yml
-name: Update Homebrew Formula
-
-on:
-  release:
-    types: [published]
-
-jobs:
-  update:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: dogxi/homebrew-tap
-          token: ${{ secrets.TAP_GITHUB_TOKEN }}
-
-      - name: Update formula
-        run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          VERSION="${VERSION#v}"  # 移除 v 前缀
-          SHA256=$(curl -sL "https://registry.npmjs.org/dxcode-cli/-/dxcode-cli-${VERSION}.tgz" | shasum -a 256 | cut -d' ' -f1)
-
-          sed -i "s|url \".*\"|url \"https://registry.npmjs.org/dxcode-cli/-/dxcode-cli-${VERSION}.tgz\"|" dxcode-cli.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" dxcode-cli.rb
-
-      - name: Commit and push
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add dxcode-cli.rb
-          git commit -m "Update dxcode-cli to ${{ github.event.release.tag_name }}"
-          git push
-```
+- `dxcode.rb` - 原生 Rust 二进制安装配方 (推荐)
+- `dxcode-cli.rb` - Node.js 版本安装配方 (备选)
 
 ## 相关链接
 
-- **官网**: https://dxc.dogxi.me
-- **GitHub**: https://github.com/dogxii/dxcode
-- **npm**: https://www.npmjs.com/package/dxcode-cli
+- 主页: https://dxc.dogxi.me
+- GitHub: https://github.com/dogxii/dxcode
+- crates.io: https://crates.io/crates/dxcode
+- npm: https://www.npmjs.com/package/dxcode
 
----
+## 许可证
 
-由 [Dogxi](https://github.com/dogxii) 创建
+MIT License - Created by Dogxi

@@ -26,17 +26,17 @@
 
 ## 📦 安装
 
-### CLI 命令行工具
+### CLI 命令行工具 (原生 Rust 二进制，高性能)
 
 ```bash
-# npm
-npm i -g dxcode-cli
+# Homebrew (macOS/Linux) - 推荐
+brew install dogxii/tap/dxcode
 
-# curl 一键安装
+# Cargo (需要 Rust)
+cargo install dxcode
+
+# curl 一键安装 (自动下载预编译二进制)
 curl -fsSL https://dxc.dogxi.me/install.sh | sh
-
-# Homebrew (macOS)
-brew install dogxi/tap/dxcode-cli
 ```
 
 安装后使用 `dxc` 命令：
@@ -44,14 +44,15 @@ brew install dogxi/tap/dxcode-cli
 ```bash
 dxc encode "Hello World"    # 编码
 dxc decode "dxQBpX..."      # 解码
-dxc "Hello World"           # 自动检测
+dxc check "dxQBpX..."       # 检查是否有效
+dxc info                    # 显示编码信息
 dxc --help                  # 查看帮助
 ```
 
 ### JavaScript / TypeScript
 
 ```bash
-npm install dxcode-lib
+npm install dxcode
 ```
 
 ### Python

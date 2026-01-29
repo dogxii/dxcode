@@ -4,8 +4,12 @@
 
 use dxcode::{decode_str, encode_str, get_info, is_encoded};
 use std::env;
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read};
 use std::process;
+
+fn print_version() {
+    println!("dxc {}", env!("CARGO_PKG_VERSION"));
+}
 
 fn print_help() {
     println!("dxcode - 带有 `dx` 前缀的自定义编码算法");
@@ -16,6 +20,7 @@ fn print_help() {
     println!("  dxc check <字符串>    检查是否为有效的 DX 编码");
     println!("  dxc info              显示编码信息");
     println!("  dxc help              显示帮助信息");
+    println!("  dxc --version         显示版本信息");
     println!();
     println!("管道用法:");
     println!("  echo 'Hello' | dxc encode");
@@ -102,6 +107,9 @@ fn main() {
     let command = args[1].to_lowercase();
 
     match command.as_str() {
+        "version" | "-v" | "-V" | "--version" => {
+            print_version();
+        }
         "help" | "-h" | "--help" => {
             print_help();
         }
