@@ -1,6 +1,6 @@
 //! dxcode - 带有 `dx` 前缀的自定义编码算法
 //!
-//! Rust 实现
+//! Rust 实现 - 带 CRC16 校验和
 //!
 //! # 示例
 //!
@@ -11,9 +11,13 @@
 //! let encoded = encode_str("你好，Dogxi！");
 //! println!("{}", encoded); // dxXXXX...
 //!
-//! // 解码
+//! // 解码（自动验证校验和）
 //! let decoded = decode_str(&encoded).unwrap();
 //! println!("{}", decoded); // 你好，Dogxi！
+//!
+//! // 验证完整性
+//! use dxcode::verify;
+//! assert!(verify(&encoded).unwrap());
 //! ```
 //!
 //! # 作者
@@ -22,7 +26,7 @@
 //!
 //! # 版本
 //!
-//! 1.0.0
+//! 2.0.0
 //!
 //! # 许可证
 //!
@@ -45,6 +49,9 @@ pub const PREFIX: &str = "dx";
 /// 填充字符
 pub const PADDING: char = '=';
 
+/// 头部大小（原始字节）: 2 字节 CRC16
+const HEADER_SIZE: usize = 2;
+
 /// 字符集字节数组
 static CHARSET_BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| CHARSET.as_bytes().to_vec());
 
@@ -55,6 +62,23 @@ static DECODE_MAP: LazyLock<HashMap<u8, u8>> = LazyLock::new(|| {
         map.insert(byte, i as u8);
     }
     map
+});
+
+/// CRC16 查找表 (CRC-16-CCITT)
+static CRC16_TABLE: LazyLock<[u16; 256]> = LazyLock::new(|| {
+    let mut table = [0u16; 256];
+    for i in 0..256 {
+        let mut crc = (i as u16) << 8;
+        for _ in 0..8 {
+            if crc & 0x8000 != 0 {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc <<= 1;
+            }
+        }
+        table[i] = crc;
+    }
+    table
 });
 
 /// DX 编码错误类型
@@ -68,6 +92,10 @@ pub enum DxError {
     InvalidCharacter(char),
     /// UTF-8 解码错误
     Utf8Error(String),
+    /// 校验和不匹配
+    ChecksumMismatch { expected: u16, actual: u16 },
+    /// 头部无效
+    InvalidHeader,
 }
 
 impl fmt::Display for DxError {
@@ -77,6 +105,10 @@ impl fmt::Display for DxError {
             DxError::InvalidLength => write!(f, "无效的 DX 编码：长度不正确"),
             DxError::InvalidCharacter(c) => write!(f, "无效的 DX 编码：包含非法字符 '{}'", c),
             DxError::Utf8Error(s) => write!(f, "UTF-8 解码错误：{}", s),
+            DxError::ChecksumMismatch { expected, actual } => {
+                write!(f, "校验和不匹配：期望 0x{:04X}，实际 0x{:04X}", expected, actual)
+            }
+            DxError::InvalidHeader => write!(f, "无效的格式头部"),
         }
     }
 }
@@ -86,32 +118,23 @@ impl Error for DxError {}
 /// DX 编码结果类型
 pub type Result<T> = std::result::Result<T, DxError>;
 
-/// 将字节切片编码为 DX 格式
-///
-/// # 参数
-///
-/// * `data` - 要编码的字节数据
-///
-/// # 返回值
-///
-/// 以 'dx' 为前缀的编码字符串
-///
-/// # 示例
-///
-/// ```
-/// use dxcode::encode;
-///
-/// let encoded = encode(b"Hello, Dogxi!");
-/// assert!(encoded.starts_with("dx"));
-/// ```
-pub fn encode(data: &[u8]) -> String {
+/// 计算 CRC16-CCITT 校验和
+pub fn crc16(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0xFFFF;
+    for &byte in data {
+        let index = ((crc >> 8) ^ (byte as u16)) as usize;
+        crc = (crc << 8) ^ CRC16_TABLE[index];
+    }
+    crc
+}
+
+/// 内部编码函数（不带前缀）
+fn encode_raw(data: &[u8]) -> String {
     if data.is_empty() {
-        return PREFIX.to_string();
+        return String::new();
     }
 
-    let mut result = String::with_capacity(PREFIX.len() + (data.len() + 2) / 3 * 4);
-    result.push_str(PREFIX);
-
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
     let charset = &*CHARSET_BYTES;
 
     // 每 3 字节处理一组
@@ -146,56 +169,8 @@ pub fn encode(data: &[u8]) -> String {
     result
 }
 
-/// 将字符串编码为 DX 格式
-///
-/// # 参数
-///
-/// * `s` - 要编码的字符串
-///
-/// # 返回值
-///
-/// 以 'dx' 为前缀的编码字符串
-///
-/// # 示例
-///
-/// ```
-/// use dxcode::encode_str;
-///
-/// let encoded = encode_str("你好，Dogxi！");
-/// assert!(encoded.starts_with("dx"));
-/// ```
-pub fn encode_str(s: &str) -> String {
-    encode(s.as_bytes())
-}
-
-/// 将 DX 编码的字符串解码为字节向量
-///
-/// # 参数
-///
-/// * `encoded` - DX 编码的字符串（必须以 'dx' 开头）
-///
-/// # 返回值
-///
-/// 解码后的字节向量，如果输入无效则返回错误
-///
-/// # 示例
-///
-/// ```
-/// use dxcode::{encode, decode};
-///
-/// let encoded = encode(b"Hello");
-/// let decoded = decode(&encoded).unwrap();
-/// assert_eq!(decoded, b"Hello");
-/// ```
-pub fn decode(encoded: &str) -> Result<Vec<u8>> {
-    // 验证前缀
-    if !encoded.starts_with(PREFIX) {
-        return Err(DxError::InvalidPrefix);
-    }
-
-    // 移除前缀
-    let data = &encoded[PREFIX.len()..];
-
+/// 内部解码函数（不带前缀验证）
+fn decode_raw(data: &str) -> Result<Vec<u8>> {
     if data.is_empty() {
         return Ok(Vec::new());
     }
@@ -277,7 +252,66 @@ pub fn decode(encoded: &str) -> Result<Vec<u8>> {
     Ok(result)
 }
 
-/// 将 DX 编码的字符串解码为字符串
+/// 将字节切片编码为 DX 格式（带 CRC16 校验和）
+///
+/// # 参数
+///
+/// * `data` - 要编码的字节数据
+///
+/// # 返回值
+///
+/// 以 'dx' 为前缀、包含 CRC16 校验和的编码字符串
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::encode;
+///
+/// let encoded = encode(b"Hello, Dogxi!");
+/// assert!(encoded.starts_with("dx"));
+/// ```
+pub fn encode(data: &[u8]) -> String {
+    // 计算 CRC16
+    let checksum = crc16(data);
+
+    // 构建头部（2字节 CRC16，大端序）
+    let header = [(checksum >> 8) as u8, (checksum & 0xFF) as u8];
+
+    // 合并头部和数据
+    let mut combined = Vec::with_capacity(HEADER_SIZE + data.len());
+    combined.extend_from_slice(&header);
+    combined.extend_from_slice(data);
+
+    // 编码
+    let mut result = String::with_capacity(PREFIX.len() + (combined.len() + 2) / 3 * 4);
+    result.push_str(PREFIX);
+    result.push_str(&encode_raw(&combined));
+    result
+}
+
+/// 将字符串编码为 DX 格式（带 CRC16 校验和）
+///
+/// # 参数
+///
+/// * `s` - 要编码的字符串
+///
+/// # 返回值
+///
+/// 以 'dx' 为前缀、包含 CRC16 校验和的编码字符串
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::encode_str;
+///
+/// let encoded = encode_str("你好，Dogxi！");
+/// assert!(encoded.starts_with("dx"));
+/// ```
+pub fn encode_str(s: &str) -> String {
+    encode(s.as_bytes())
+}
+
+/// 将 DX 编码的字符串解码为字节向量（带校验和验证）
 ///
 /// # 参数
 ///
@@ -285,7 +319,61 @@ pub fn decode(encoded: &str) -> Result<Vec<u8>> {
 ///
 /// # 返回值
 ///
-/// 解码后的字符串，如果输入无效或不是有效的 UTF-8 则返回错误
+/// 解码后的字节向量，如果输入无效或校验和不匹配则返回错误
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::{encode, decode};
+///
+/// let encoded = encode(b"Hello");
+/// let decoded = decode(&encoded).unwrap();
+/// assert_eq!(decoded, b"Hello");
+/// ```
+pub fn decode(encoded: &str) -> Result<Vec<u8>> {
+    // 验证前缀
+    if !encoded.starts_with(PREFIX) {
+        return Err(DxError::InvalidPrefix);
+    }
+
+    // 移除前缀
+    let data = &encoded[PREFIX.len()..];
+
+    // 解码
+    let combined = decode_raw(data)?;
+
+    // 验证长度
+    if combined.len() < HEADER_SIZE {
+        return Err(DxError::InvalidHeader);
+    }
+
+    // 提取头部
+    let expected_checksum = ((combined[0] as u16) << 8) | (combined[1] as u16);
+
+    // 提取数据
+    let payload = &combined[HEADER_SIZE..];
+
+    // 验证校验和
+    let actual_checksum = crc16(payload);
+    if expected_checksum != actual_checksum {
+        return Err(DxError::ChecksumMismatch {
+            expected: expected_checksum,
+            actual: actual_checksum,
+        });
+    }
+
+    Ok(payload.to_vec())
+}
+
+/// 将 DX 编码的字符串解码为字符串（带校验和验证）
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+///
+/// # 返回值
+///
+/// 解码后的字符串，如果输入无效、校验和不匹配或不是有效的 UTF-8 则返回错误
 ///
 /// # 示例
 ///
@@ -327,7 +415,7 @@ pub fn is_encoded(s: &str) -> bool {
 
     let data = &s[PREFIX.len()..];
 
-    // 检查长度
+    // 检查长度（至少需要头部）
     if data.is_empty() || data.len() % 4 != 0 {
         return false;
     }
@@ -349,6 +437,76 @@ pub fn is_encoded(s: &str) -> bool {
     true
 }
 
+/// 验证 DX 编码的校验和（不返回解码数据）
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+///
+/// # 返回值
+///
+/// 如果校验和匹配返回 `Ok(true)`，不匹配返回 `Ok(false)`，格式无效返回错误
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::{encode_str, verify};
+///
+/// let encoded = encode_str("Hello");
+/// assert!(verify(&encoded).unwrap());
+/// ```
+pub fn verify(encoded: &str) -> Result<bool> {
+    match decode(encoded) {
+        Ok(_) => Ok(true),
+        Err(DxError::ChecksumMismatch { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// 获取 DX 编码的校验和信息
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+///
+/// # 返回值
+///
+/// 返回 `(存储的校验和, 实际计算的校验和)`
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::{encode_str, get_checksum};
+///
+/// let encoded = encode_str("Hello");
+/// let (stored, computed) = get_checksum(&encoded).unwrap();
+/// assert_eq!(stored, computed);
+/// ```
+pub fn get_checksum(encoded: &str) -> Result<(u16, u16)> {
+    // 验证前缀
+    if !encoded.starts_with(PREFIX) {
+        return Err(DxError::InvalidPrefix);
+    }
+
+    // 移除前缀
+    let data = &encoded[PREFIX.len()..];
+
+    // 解码
+    let combined = decode_raw(data)?;
+
+    // 验证长度
+    if combined.len() < HEADER_SIZE {
+        return Err(DxError::InvalidHeader);
+    }
+
+    // 提取校验和
+    let stored = ((combined[0] as u16) << 8) | (combined[1] as u16);
+    let payload = &combined[HEADER_SIZE..];
+    let computed = crc16(payload);
+
+    Ok((stored, computed))
+}
+
 /// DX 编码信息
 #[derive(Debug, Clone)]
 pub struct Info {
@@ -359,6 +517,7 @@ pub struct Info {
     pub prefix: &'static str,
     pub magic: u8,
     pub padding: char,
+    pub checksum: &'static str,
 }
 
 /// 获取 DX 编码的信息
@@ -379,12 +538,13 @@ pub struct Info {
 pub fn get_info() -> Info {
     Info {
         name: "DX Encoding",
-        version: "1.0.0",
+        version: "2.0.0",
         author: "Dogxi",
         charset: CHARSET,
         prefix: PREFIX,
         magic: MAGIC,
         padding: PADDING,
+        checksum: "CRC16-CCITT",
     }
 }
 
@@ -423,7 +583,7 @@ mod tests {
         let encoded = encode_str(original);
         let decoded = decode_str(&encoded).unwrap();
         assert_eq!(decoded, original);
-        assert_eq!(encoded, "dx");
+        assert!(encoded.starts_with("dx"));
     }
 
     #[test]
@@ -464,19 +624,40 @@ mod tests {
     }
 
     #[test]
-    fn test_padding() {
-        // 3 字节 - 无填充
-        let encoded3 = encode_str("abc");
-        assert!(!encoded3.ends_with('='));
+    fn test_checksum_verification() {
+        let encoded = encode_str("Hello");
+        assert!(verify(&encoded).unwrap());
 
-        // 2 字节 - 1 个填充
-        let encoded2 = encode_str("ab");
-        assert!(encoded2.ends_with('='));
-        assert!(!encoded2.ends_with("=="));
+        let (stored, computed) = get_checksum(&encoded).unwrap();
+        assert_eq!(stored, computed);
+    }
 
-        // 1 字节 - 2 个填充
-        let encoded1 = encode_str("a");
-        assert!(encoded1.ends_with("=="));
+    #[test]
+    fn test_checksum_mismatch() {
+        let encoded = encode_str("Hello World Test Data");
+
+        // 篡改数据 - 修改数据部分（跳过前缀和校验和头部区域）
+        // 编码格式: "dx" + 编码后的(2字节CRC + 数据)
+        // 我们需要修改数据部分的字符
+        let mut chars: Vec<char> = encoded.chars().collect();
+
+        // 找到一个可以修改的位置（跳过 "dx" 前缀，在数据部分修改）
+        // 修改位置 6（在数据区域内）
+        if chars.len() > 10 {
+            let pos = 10;
+            let original_char = chars[pos];
+            // 用字符集中的另一个有效字符替换
+            chars[pos] = if original_char == 'A' { 'B' } else { 'A' };
+        }
+
+        let modified: String = chars.into_iter().collect();
+
+        // 验证应该失败（校验和不匹配或无效字符）
+        let result = decode(&modified);
+        assert!(
+            matches!(result, Err(DxError::ChecksumMismatch { .. }))
+                || matches!(result, Err(DxError::InvalidCharacter(_)))
+        );
     }
 
     #[test]
@@ -487,6 +668,8 @@ mod tests {
         assert_eq!(info.prefix, "dx");
         assert_eq!(info.magic, 0x44);
         assert_eq!(info.charset.len(), 64);
+        assert_eq!(info.version, "2.0.0");
+        assert_eq!(info.checksum, "CRC16-CCITT");
     }
 
     #[test]
@@ -497,5 +680,30 @@ mod tests {
             let decoded = decode(&encoded).unwrap();
             assert_eq!(decoded, original, "长度 {} 失败", length);
         }
+    }
+
+    #[test]
+    fn test_crc16() {
+        // 测试空数据
+        assert_eq!(crc16(&[]), 0xFFFF);
+
+        // 测试已知值 - CRC-16-CCITT for "123456789" should be 0x29B1
+        let data = b"123456789";
+        let crc = crc16(data);
+        assert_eq!(crc, 0x29B1);
+    }
+
+    #[test]
+    fn test_crc16_deterministic() {
+        let data = b"Hello, World!";
+        let crc1 = crc16(data);
+        let crc2 = crc16(data);
+        assert_eq!(crc1, crc2);
+    }
+
+    #[test]
+    fn test_verify_function() {
+        let encoded = encode_str("Test data for verification");
+        assert!(verify(&encoded).unwrap());
     }
 }

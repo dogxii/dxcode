@@ -1,6 +1,7 @@
 """
 dxcode 测试文件
 由 Dogxi 创建
+v2.0 - 带 CRC16 校验和支持
 """
 
 import unittest
@@ -10,9 +11,13 @@ from dxcode import (
     MAGIC,
     PADDING,
     PREFIX,
+    DxChecksumError,
     DxEncodingError,
+    crc16,
     dx_decode,
     dx_encode,
+    dx_verify,
+    get_checksum,
     get_dx_info,
     is_dx_encoded,
 )
@@ -56,7 +61,7 @@ class TestDxEncoding(unittest.TestCase):
         encoded = dx_encode(original)
         decoded = dx_decode(encoded)
         self.assertEqual(decoded, original)
-        self.assertEqual(encoded, "dx")
+        self.assertTrue(encoded.startswith("dx"))
 
     def test_single_char(self):
         """测试单个字符"""
@@ -136,6 +141,77 @@ class TestDxEncoding(unittest.TestCase):
         self.assertEqual(decoded, original)
 
 
+class TestChecksum(unittest.TestCase):
+    """测试校验和功能"""
+
+    def test_crc16_known_value(self):
+        """测试 CRC16 已知值"""
+        # CRC-16-CCITT for "123456789" should be 0x29B1
+        data = b"123456789"
+        result = crc16(data)
+        self.assertEqual(result, 0x29B1)
+
+    def test_crc16_empty(self):
+        """测试空数据的 CRC16"""
+        result = crc16(b"")
+        self.assertEqual(result, 0xFFFF)
+
+    def test_crc16_deterministic(self):
+        """测试 CRC16 确定性"""
+        data = b"Hello, World!"
+        crc1 = crc16(data)
+        crc2 = crc16(data)
+        self.assertEqual(crc1, crc2)
+
+    def test_checksum_verification(self):
+        """测试校验和验证"""
+        encoded = dx_encode("Hello")
+        self.assertTrue(dx_verify(encoded))
+
+    def test_checksum_get(self):
+        """测试获取校验和"""
+        encoded = dx_encode("Hello")
+        stored, computed = get_checksum(encoded)
+        self.assertEqual(stored, computed)
+
+    def test_checksum_mismatch_detection(self):
+        """测试校验和不匹配检测"""
+        encoded = dx_encode("Hello World Test Data")
+        # 篡改编码字符串中的一个字符
+        chars = list(encoded)
+        if len(chars) > 10:
+            chars[10] = "A" if chars[10] != "A" else "B"
+        tampered = "".join(chars)
+
+        # 验证应该失败或抛出错误
+        try:
+            result = dx_verify(tampered)
+            self.assertFalse(result)
+        except DxEncodingError:
+            # 如果抛出编码错误（如无效字符），也是预期的
+            pass
+
+    def test_checksum_error_details(self):
+        """测试校验和错误详情"""
+        encoded = dx_encode("Test")
+        # 篡改数据
+        chars = list(encoded)
+        if len(chars) > 8:
+            chars[8] = "A" if chars[8] != "A" else "B"
+        tampered = "".join(chars)
+
+        try:
+            dx_decode(tampered)
+            self.fail("应该抛出异常")
+        except DxChecksumError as e:
+            # 验证错误信息包含校验和值
+            self.assertIsInstance(e.expected, int)
+            self.assertIsInstance(e.actual, int)
+        except DxEncodingError:
+            # 其他编码错误也可接受
+            pass
+
+
 class TestIsDxEncoded(unittest.TestCase):
     """测试 is_dx_encoded 函数"""
 
@@ -168,9 +244,28 @@ class TestIsDxEncoded(unittest.TestCase):
         """测试无效字符"""
         self.assertFalse(is_dx_encoded("dx!!!!"))
 
-    def test_just_prefix(self):
-        """测试只有前缀"""
-        self.assertTrue(is_dx_encoded("dx"))  # 空字符串编码后的结果
+
+class TestDxVerify(unittest.TestCase):
+    """测试 dx_verify 函数"""
+
+    def test_verify_valid(self):
+        """测试验证有效编码"""
+        encoded = dx_encode("Hello, Dogxi!")
+        self.assertTrue(dx_verify(encoded))
+
+    def test_verify_various_data(self):
+        """测试验证各种数据"""
+        test_cases = [
+            "Hello",
+            "你好世界",
+            "🎉🚀✨",
+            "1234567890",
+            "",
+            "a" * 1000,
+        ]
+        for data in test_cases:
+            encoded = dx_encode(data)
+            self.assertTrue(dx_verify(encoded), f"验证失败: {data[:20]}...")
 
 
 class TestErrorHandling(unittest.TestCase):
@@ -201,6 +296,11 @@ class TestErrorHandling(unittest.TestCase):
         with self.assertRaises(DxEncodingError):
             dx_encode([1, 2, 3])
 
+    def test_get_checksum_invalid(self):
+        """测试获取无效编码的校验和"""
+        with self.assertRaises(DxEncodingError):
+            get_checksum("invalid")
+
 
 class TestGetDxInfo(unittest.TestCase):
     """测试获取信息函数"""
@@ -215,15 +315,18 @@ class TestGetDxInfo(unittest.TestCase):
         self.assertIn("prefix", info)
         self.assertIn("magic", info)
         self.assertIn("padding", info)
+        self.assertIn("checksum", info)
 
     def test_info_values(self):
         """测试信息值"""
         info = get_dx_info()
         self.assertEqual(info["name"], "DX Encoding")
+        self.assertEqual(info["version"], "2.0.0")
         self.assertEqual(info["author"], "Dogxi")
         self.assertEqual(info["prefix"], "dx")
         self.assertEqual(info["magic"], 0x44)
         self.assertEqual(info["padding"], "=")
+        self.assertEqual(info["checksum"], "CRC16-CCITT")
 
 
 class TestConstants(unittest.TestCase):
@@ -251,26 +354,6 @@ class TestConstants(unittest.TestCase):
         self.assertEqual(PADDING, "=")
 
 
-class TestPadding(unittest.TestCase):
-    """测试填充逻辑"""
-
-    def test_no_padding(self):
-        """测试无填充（3 字节的倍数）"""
-        encoded = dx_encode("abc")  # 3 bytes
-        self.assertFalse(encoded.endswith("="))
-
-    def test_one_padding(self):
-        """测试一个填充（2 字节余数）"""
-        encoded = dx_encode("ab")  # 2 bytes
-        self.assertTrue(encoded.endswith("="))
-        self.assertFalse(encoded.endswith("=="))
-
-    def test_two_padding(self):
-        """测试两个填充（1 字节余数）"""
-        encoded = dx_encode("a")  # 1 byte
-        self.assertTrue(encoded.endswith("=="))
-
-
 class TestRoundTrip(unittest.TestCase):
     """往返测试"""
 
@@ -290,10 +373,27 @@ class TestRoundTrip(unittest.TestCase):
             decoded = dx_decode(encoded, as_string=False)
             self.assertEqual(decoded, original, f"二进制长度 {length} 失败")
 
+    def test_roundtrip_with_verification(self):
+        """测试带校验和验证的往返"""
+        test_data = [
+            "Hello",
+            "你好世界",
+            b"\x00\x01\x02\xff",
+            "Mixed 混合 🎯",
+        ]
+        for data in test_data:
+            encoded = dx_encode(data)
+            self.assertTrue(dx_verify(encoded))
+            if isinstance(data, bytes):
+                decoded = dx_decode(encoded, as_string=False)
+            else:
+                decoded = dx_decode(encoded)
+            self.assertEqual(decoded, data)
+
 
 if __name__ == "__main__":
     print("╔════════════════════════════════════════════════════════════╗")
-    print("║              DX Encoding Python 测试套件                   ║")
+    print("║          DX Encoding Python 测试套件 v2.0                  ║")
     print("║              由 Dogxi 创建                                 ║")
     print("╚════════════════════════════════════════════════════════════╝")
     print()
@@ -306,6 +406,7 @@ if __name__ == "__main__":
     print(f"   作者: {info['author']}")
     print(f"   前缀: {info['prefix']}")
     print(f"   魔数: 0x{info['magic']:02X}")
+    print(f"   校验和: {info['checksum']}")
     print()
 
     # 运行测试

@@ -2,8 +2,10 @@
  * DX Encoding - 带有 `dx` 前缀的自定义编码算法
  *
  * @author Dogxi
- * @version 1.0.0
+ * @version 2.0.0
  * @license MIT
+ *
+ * v2.0 新增: CRC16-CCITT 校验和支持
  */
 
 // DX 字符集 - 以 DXdx 开头作为签名，共64个字符
@@ -19,10 +21,41 @@ const PREFIX = "dx";
 // 填充字符
 const PADDING = "=";
 
+// 头部大小（2字节 CRC16）
+const HEADER_SIZE = 2;
+
 // 构建反向查找表
 const DX_DECODE_MAP = {};
 for (let i = 0; i < DX_CHARSET.length; i++) {
 	DX_DECODE_MAP[DX_CHARSET[i]] = i;
+}
+
+// CRC16-CCITT 查找表
+const CRC16_TABLE = new Uint16Array(256);
+for (let i = 0; i < 256; i++) {
+	let crc = i << 8;
+	for (let j = 0; j < 8; j++) {
+		if (crc & 0x8000) {
+			crc = ((crc << 1) ^ 0x1021) & 0xffff;
+		} else {
+			crc = (crc << 1) & 0xffff;
+		}
+	}
+	CRC16_TABLE[i] = crc;
+}
+
+/**
+ * 计算 CRC16-CCITT 校验和
+ * @param {Uint8Array} data - 输入数据
+ * @returns {number} 16位校验和
+ */
+function crc16(data) {
+	let crc = 0xffff;
+	for (let i = 0; i < data.length; i++) {
+		const index = ((crc >> 8) ^ data[i]) & 0xff;
+		crc = ((crc << 8) ^ CRC16_TABLE[index]) & 0xffff;
+	}
+	return crc;
 }
 
 /**
@@ -46,27 +79,13 @@ function bytesToString(bytes) {
 }
 
 /**
- * DX 编码
- * 将字符串或字节数组编码为 DX 格式
- *
- * @param {string|Uint8Array|number[]} input - 要编码的数据
- * @returns {string} DX 编码后的字符串（带 dx 前缀）
- *
- * @example
- * dxEncode('Hello, Dogxi!')  // 返回 'dxXXXX...'
- * dxEncode(new Uint8Array([0x48, 0x69]))  // 返回 'dxXXXX...'
+ * 内部编码函数（不带前缀）
+ * @param {Uint8Array} bytes - 要编码的字节数组
+ * @returns {string} 编码后的字符串（不含前缀）
  */
-function dxEncode(input) {
-	// 将输入转换为字节数组
-	let bytes;
-	if (typeof input === "string") {
-		bytes = stringToBytes(input);
-	} else if (input instanceof Uint8Array) {
-		bytes = input;
-	} else if (Array.isArray(input)) {
-		bytes = new Uint8Array(input);
-	} else {
-		throw new Error("输入必须是字符串、Uint8Array 或数字数组");
+function encodeRaw(bytes) {
+	if (bytes.length === 0) {
+		return "";
 	}
 
 	let result = "";
@@ -101,33 +120,17 @@ function dxEncode(input) {
 		}
 	}
 
-	return PREFIX + result;
+	return result;
 }
 
 /**
- * DX 解码
- * 将 DX 编码的字符串解码为原始数据
- *
- * @param {string} encoded - DX 编码的字符串
- * @param {Object} options - 选项
- * @param {boolean} options.asString - 是否返回字符串（默认 true）
- * @returns {string|Uint8Array} 解码后的数据
- *
- * @example
- * dxDecode('dxXXXX...')  // 返回 'Hello, Dogxi!'
- * dxDecode('dxXXXX...', { asString: false })  // 返回 Uint8Array
+ * 内部解码函数（不带前缀验证）
+ * @param {string} data - 编码数据（不含前缀）
+ * @returns {Uint8Array} 解码后的字节数组
  */
-function dxDecode(encoded, options = { asString: true }) {
-	// 验证前缀
-	if (!encoded || !encoded.startsWith(PREFIX)) {
-		throw new Error("无效的 DX 编码：缺少 dx 前缀");
-	}
-
-	// 移除前缀
-	const data = encoded.slice(PREFIX.length);
-
+function decodeRaw(data) {
 	if (data.length === 0) {
-		return options.asString ? "" : new Uint8Array(0);
+		return new Uint8Array(0);
 	}
 
 	// 验证长度
@@ -188,7 +191,94 @@ function dxDecode(encoded, options = { asString: true }) {
 		if (resultIndex < outputLen) result[resultIndex++] = b2;
 	}
 
-	return options.asString ? bytesToString(result) : result;
+	return result;
+}
+
+/**
+ * DX 编码（带 CRC16 校验和）
+ * 将字符串或字节数组编码为 DX 格式
+ *
+ * @param {string|Uint8Array|number[]} input - 要编码的数据
+ * @returns {string} DX 编码后的字符串（带 dx 前缀和校验和）
+ *
+ * @example
+ * dxEncode('Hello, Dogxi!')  // 返回 'dxXXXX...'
+ * dxEncode(new Uint8Array([0x48, 0x69]))  // 返回 'dxXXXX...'
+ */
+function dxEncode(input) {
+	// 将输入转换为字节数组
+	let bytes;
+	if (typeof input === "string") {
+		bytes = stringToBytes(input);
+	} else if (input instanceof Uint8Array) {
+		bytes = input;
+	} else if (Array.isArray(input)) {
+		bytes = new Uint8Array(input);
+	} else {
+		throw new Error("输入必须是字符串、Uint8Array 或数字数组");
+	}
+
+	// 计算 CRC16
+	const checksum = crc16(bytes);
+
+	// 构建头部（2字节 CRC16，大端序）
+	const header = new Uint8Array([checksum >> 8, checksum & 0xff]);
+
+	// 合并头部和数据
+	const combined = new Uint8Array(HEADER_SIZE + bytes.length);
+	combined.set(header, 0);
+	combined.set(bytes, HEADER_SIZE);
+
+	// 编码
+	return PREFIX + encodeRaw(combined);
+}
+
+/**
+ * DX 解码（带校验和验证）
+ * 将 DX 编码的字符串解码为原始数据
+ *
+ * @param {string} encoded - DX 编码的字符串
+ * @param {Object} options - 选项
+ * @param {boolean} options.asString - 是否返回字符串（默认 true）
+ * @returns {string|Uint8Array} 解码后的数据
+ * @throws {Error} 如果校验和不匹配
+ *
+ * @example
+ * dxDecode('dxXXXX...')  // 返回 'Hello, Dogxi!'
+ * dxDecode('dxXXXX...', { asString: false })  // 返回 Uint8Array
+ */
+function dxDecode(encoded, options = { asString: true }) {
+	// 验证前缀
+	if (!encoded || !encoded.startsWith(PREFIX)) {
+		throw new Error("无效的 DX 编码：缺少 dx 前缀");
+	}
+
+	// 移除前缀
+	const data = encoded.slice(PREFIX.length);
+
+	// 解码
+	const combined = decodeRaw(data);
+
+	// 验证长度
+	if (combined.length < HEADER_SIZE) {
+		throw new Error("无效的格式头部");
+	}
+
+	// 提取头部
+	const expectedChecksum = (combined[0] << 8) | combined[1];
+
+	// 提取数据
+	const payload = combined.slice(HEADER_SIZE);
+
+	// 验证校验和
+	const actualChecksum = crc16(payload);
+	if (expectedChecksum !== actualChecksum) {
+		throw new Error(
+			`校验和不匹配：期望 0x${expectedChecksum.toString(16).toUpperCase().padStart(4, "0")}，实际 0x${actualChecksum.toString(16).toUpperCase().padStart(4, "0")}`,
+		);
+	}
+
+	return options.asString ? bytesToString(payload) : payload;
 }
 
 /**
@@ -212,13 +302,8 @@ function isDxEncoded(str) {
 
 	const data = str.slice(PREFIX.length);
 
-	// 空字符串编码后只有前缀，也是有效的
-	if (data.length === 0) {
-		return true;
-	}
-
-	// 检查长度
-	if (data.length % 4 !== 0) {
+	// 检查长度（至少需要头部）
+	if (data.length === 0 || data.length % 4 !== 0) {
 		return false;
 	}
 
@@ -239,6 +324,61 @@ function isDxEncoded(str) {
 }
 
 /**
+ * 验证 DX 编码的校验和（不返回解码数据）
+ *
+ * @param {string} encoded - DX 编码的字符串
+ * @returns {boolean} 校验和是否匹配
+ *
+ * @example
+ * dxVerify('dxXXXX...')  // true 或 false
+ */
+function dxVerify(encoded) {
+	try {
+		dxDecode(encoded, { asString: false });
+		return true;
+	} catch (e) {
+		if (e.message.includes("校验和不匹配")) {
+			return false;
+		}
+		throw e;
+	}
+}
+
+/**
+ * 获取 DX 编码的校验和信息
+ *
+ * @param {string} encoded - DX 编码的字符串
+ * @returns {{stored: number, computed: number}} 存储的和计算的校验和
+ *
+ * @example
+ * getChecksum('dxXXXX...')  // { stored: 0x1234, computed: 0x1234 }
+ */
+function getChecksum(encoded) {
+	// 验证前缀
+	if (!encoded || !encoded.startsWith(PREFIX)) {
+		throw new Error("无效的 DX 编码：缺少 dx 前缀");
+	}
+
+	// 移除前缀
+	const data = encoded.slice(PREFIX.length);
+
+	// 解码
+	const combined = decodeRaw(data);
+
+	// 验证长度
+	if (combined.length < HEADER_SIZE) {
+		throw new Error("无效的格式头部");
+	}
+
+	// 提取校验和
+	const stored = (combined[0] << 8) | combined[1];
+	const payload = combined.slice(HEADER_SIZE);
+	const computed = crc16(payload);
+
+	return { stored, computed };
+}
+
+/**
  * 获取 DX 编码信息
  *
  * @returns {Object} 编码信息
@@ -246,12 +386,13 @@ function isDxEncoded(str) {
 function getDxInfo() {
 	return {
 		name: "DX Encoding",
-		version: "1.0.0",
+		version: "2.0.0",
 		author: "Dogxi",
 		charset: DX_CHARSET,
 		prefix: PREFIX,
 		magic: MAGIC,
 		padding: PADDING,
+		checksum: "CRC16-CCITT",
 	};
 }
 
@@ -261,7 +402,10 @@ if (typeof module !== "undefined" && module.exports) {
 		dxEncode,
 		dxDecode,
 		isDxEncoded,
+		dxVerify,
+		getChecksum,
 		getDxInfo,
+		crc16,
 		DX_CHARSET,
 		PREFIX,
 		MAGIC,
@@ -274,7 +418,10 @@ export {
 	dxEncode,
 	dxDecode,
 	isDxEncoded,
+	dxVerify,
+	getChecksum,
 	getDxInfo,
+	crc16,
 	DX_CHARSET,
 	PREFIX,
 	MAGIC,
@@ -285,5 +432,8 @@ export default {
 	encode: dxEncode,
 	decode: dxDecode,
 	isEncoded: isDxEncoded,
+	verify: dxVerify,
+	getChecksum,
 	info: getDxInfo,
+	crc16,
 };

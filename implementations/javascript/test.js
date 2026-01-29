@@ -1,9 +1,18 @@
 /**
  * dxcode 测试文件
  * 由 Dogxi 创建
+ * v2.0 - 带 CRC16 校验和支持
  */
 
-const { dxEncode, dxDecode, isDxEncoded, getDxInfo } = require("./dxcode");
+const {
+	dxEncode,
+	dxDecode,
+	isDxEncoded,
+	dxVerify,
+	getChecksum,
+	getDxInfo,
+	crc16,
+} = require("./dxcode");
 
 // 测试用例
 const testCases = [
@@ -34,7 +43,7 @@ let passed = 0;
 let failed = 0;
 
 console.log("╔════════════════════════════════════════════════════════════╗");
-console.log("║              DX Encoding 测试套件                          ║");
+console.log("║              DX Encoding 测试套件 v2.0                     ║");
 console.log("║              由 Dogxi 创建                                 ║");
 console.log("╚════════════════════════════════════════════════════════════╝");
 console.log();
@@ -47,6 +56,7 @@ console.log(`   版本: ${info.version}`);
 console.log(`   作者: ${info.author}`);
 console.log(`   前缀: ${info.prefix}`);
 console.log(`   魔数: 0x${info.magic.toString(16).toUpperCase()}`);
+console.log(`   校验和: ${info.checksum}`);
 console.log();
 
 console.log("🧪 运行测试用例...");
@@ -69,6 +79,11 @@ for (const testCase of testCases) {
 			throw new Error(`isDxEncoded 返回 false: ${encoded}`);
 		}
 
+		// 验证校验和
+		if (!dxVerify(encoded)) {
+			throw new Error(`校验和验证失败: ${encoded}`);
+		}
+
 		// 解码
 		const decoded = dxDecode(encoded);
 
@@ -89,6 +104,81 @@ for (const testCase of testCases) {
 		console.log(`❌ ${testCase.description}`);
 		console.log(`   错误: ${error.message}`);
 		failed++;
+	}
+}
+
+console.log("─".repeat(60));
+console.log();
+
+// 校验和测试
+console.log("🔐 校验和测试...");
+console.log("─".repeat(60));
+
+try {
+	// CRC16 已知值测试
+	const testData = new TextEncoder().encode("123456789");
+	const crcResult = crc16(testData);
+	if (crcResult !== 0x29b1) {
+		throw new Error(
+			`CRC16 计算错误: 期望 0x29B1, 实际 0x${crcResult.toString(16).toUpperCase()}`,
+		);
+	}
+	console.log("✅ CRC16 已知值测试 (123456789 -> 0x29B1)");
+	passed++;
+} catch (error) {
+	console.log(`❌ CRC16 已知值测试`);
+	console.log(`   错误: ${error.message}`);
+	failed++;
+}
+
+try {
+	// 校验和获取测试
+	const encoded = dxEncode("Hello");
+	const { stored, computed } = getChecksum(encoded);
+	if (stored !== computed) {
+		throw new Error(
+			`校验和不一致: stored=0x${stored.toString(16)}, computed=0x${computed.toString(16)}`,
+		);
+	}
+	console.log("✅ 校验和获取测试");
+	console.log(
+		`   CRC16: 0x${stored.toString(16).toUpperCase().padStart(4, "0")}`,
+	);
+	passed++;
+} catch (error) {
+	console.log(`❌ 校验和获取测试`);
+	console.log(`   错误: ${error.message}`);
+	failed++;
+}
+
+try {
+	// 校验和篡改检测测试
+	const encoded = dxEncode("Hello World Test");
+	// 篡改编码字符串中的一个字符
+	const chars = encoded.split("");
+	if (chars.length > 10) {
+		chars[10] = chars[10] === "A" ? "B" : "A";
+	}
+	const tampered = chars.join("");
+
+	// 验证应该失败
+	const verifyResult = dxVerify(tampered);
+	if (verifyResult === true) {
+		throw new Error("篡改后的数据验证应该失败");
+	}
+	console.log("✅ 校验和篡改检测测试");
+	console.log("   成功检测到数据篡改");
+	passed++;
+} catch (error) {
+	if (error.message.includes("篡改后的数据验证应该失败")) {
+		console.log(`❌ 校验和篡改检测测试`);
+		console.log(`   错误: ${error.message}`);
+		failed++;
+	} else {
+		// 抛出的其他错误也是预期的（比如无效字符）
+		console.log("✅ 校验和篡改检测测试");
+		console.log("   成功检测到数据篡改");
+		passed++;
 	}
 }
 
@@ -134,6 +224,35 @@ try {
 	failed++;
 }
 
+try {
+	// 所有字节值测试
+	const allBytes = new Uint8Array(256);
+	for (let i = 0; i < 256; i++) {
+		allBytes[i] = i;
+	}
+	const encoded = dxEncode(allBytes);
+	const decoded = dxDecode(encoded, { asString: false });
+
+	let match = true;
+	for (let i = 0; i < 256; i++) {
+		if (allBytes[i] !== decoded[i]) {
+			match = false;
+			break;
+		}
+	}
+
+	if (match) {
+		console.log("✅ 所有字节值 (0x00-0xFF) 编解码");
+		passed++;
+	} else {
+		throw new Error("字节值解码不匹配");
+	}
+} catch (error) {
+	console.log(`❌ 所有字节值测试`);
+	console.log(`   错误: ${error.message}`);
+	failed++;
+}
+
 console.log("─".repeat(60));
 console.log();
 
@@ -163,6 +282,11 @@ const errorTests = [
 		description: "isDxEncoded 对 null 返回 false",
 		shouldThrow: false,
 		expected: false,
+	},
+	{
+		fn: () => getChecksum("invalid"),
+		description: "getChecksum 对无效输入抛出错误",
+		shouldThrow: true,
 	},
 ];
 

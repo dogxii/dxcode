@@ -10,10 +10,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="dxcode",
-    version="1.0.0",
+    version="2.0.0",
     author="Dogxi",
     author_email="hi@dogxi.me",
-    description="[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix.",
+    description="[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix and CRC16 checksum.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/dogxii/dxcode",

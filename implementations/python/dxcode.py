@@ -4,11 +4,13 @@ DX Encoding - 带有 `dx` 前缀的自定义编码算法
 Python 实现
 
 作者: Dogxi
-版本: 1.0.0
+版本: 2.0.0
 许可证: MIT
+
+v2.0 新增: CRC16-CCITT 校验和支持
 """
 
-from typing import Union
+from typing import Tuple, Union
 
 # DX 字符集 - 以 DXdx 开头作为签名，共64个字符
 DX_CHARSET = "DXdx0123456789ABCEFGHIJKLMNOPQRSTUVWYZabcefghijklmnopqrstuvwyz-_"
@@ -22,8 +24,22 @@ PREFIX = "dx"
 # 填充字符
 PADDING = "="
 
+# 头部大小（2字节 CRC16）
+HEADER_SIZE = 2
+
 # 构建反向查找表
 DX_DECODE_MAP = {char: idx for idx, char in enumerate(DX_CHARSET)}
+
+# CRC16-CCITT 查找表
+CRC16_TABLE = []
+for i in range(256):
+    crc = i << 8
+    for _ in range(8):
+        if crc & 0x8000:
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+        else:
+            crc = (crc << 1) & 0xFFFF
+    CRC16_TABLE.append(crc)
 
 
 class DxEncodingError(Exception):
@@ -32,29 +48,44 @@ class DxEncodingError(Exception):
     pass
 
 
-def dx_encode(data: Union[str, bytes, bytearray]) -> str:
+class DxChecksumError(DxEncodingError):
+    """DX 校验和错误"""
+
+    def __init__(self, expected: int, actual: int):
+        self.expected = expected
+        self.actual = actual
+        super().__init__(f"校验和不匹配：期望 0x{expected:04X}，实际 0x{actual:04X}")
+
+
+def crc16(data: bytes) -> int:
     """
-    将数据编码为 DX 格式
+    计算 CRC16-CCITT 校验和
 
     参数:
-        data: 要编码的数据（字符串、bytes 或 bytearray）
+        data: 输入字节数据
 
     返回:
-        以 'dx' 为前缀的编码字符串
-
-    示例:
-        >>> dx_encode('Hello, Dogxi!')
-        'dxXXXX...'
-        >>> dx_encode(b'\\x00\\x01\\x02')
-        'dxXXXX...'
+        16位校验和
     """
-    # 将输入转换为字节
-    if isinstance(data, str):
-        data = data.encode("utf-8")
-    elif isinstance(data, bytearray):
-        data = bytes(data)
-    elif not isinstance(data, bytes):
-        raise DxEncodingError("输入必须是 str、bytes 或 bytearray")
+    crc = 0xFFFF
+    for byte in data:
+        index = ((crc >> 8) ^ byte) & 0xFF
+        crc = ((crc << 8) ^ CRC16_TABLE[index]) & 0xFFFF
+    return crc
+
+
+def _encode_raw(data: bytes) -> str:
+    """
+    内部编码函数（不带前缀）
+
+    参数:
+        data: 要编码的字节数据
+
+    返回:
+        编码后的字符串（不含前缀）
+    """
+    if len(data) == 0:
+        return ""
 
     result = []
     length = len(data)
@@ -85,38 +116,21 @@ def dx_encode(data: Union[str, bytes, bytearray]) -> str:
         else:
             result.append(PADDING)
 
-    return PREFIX + "".join(result)
+    return "".join(result)
 
 
-def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
+def _decode_raw(data: str) -> bytes:
     """
-    将 DX 编码的字符串解码
+    内部解码函数（不带前缀验证）
 
     参数:
-        encoded: DX 编码的字符串（必须以 'dx' 开头）
-        as_string: 是否返回字符串（默认 True）
+        data: 编码数据（不含前缀）
 
     返回:
-        解码后的字符串或字节
-
-    异常:
-        DxEncodingError: 如果输入不是有效的 DX 编码
-
-    示例:
-        >>> dx_decode('dxXXXX...')
-        'Hello, Dogxi!'
-        >>> dx_decode('dxXXXX...', as_string=False)
-        b'Hello, Dogxi!'
+        解码后的字节数据
     """
-    # 验证前缀
-    if not encoded or not encoded.startswith(PREFIX):
-        raise DxEncodingError("无效的 DX 编码：缺少 dx 前缀")
-
-    # 移除前缀
-    data = encoded[len(PREFIX) :]
-
     if len(data) == 0:
-        return "" if as_string else b""
+        return b""
 
     # 验证长度
     if len(data) % 4 != 0:
@@ -172,15 +186,99 @@ def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
             result[result_idx] = b2
             result_idx += 1
 
-    result_bytes = bytes(result)
+    return bytes(result)
+
+
+def dx_encode(data: Union[str, bytes, bytearray]) -> str:
+    """
+    将数据编码为 DX 格式（带 CRC16 校验和）
+
+    参数:
+        data: 要编码的数据（字符串、bytes 或 bytearray）
+
+    返回:
+        以 'dx' 为前缀的编码字符串（包含校验和）
+
+    示例:
+        >>> dx_encode('Hello, Dogxi!')
+        'dxXXXX...'
+        >>> dx_encode(b'\\x00\\x01\\x02')
+        'dxXXXX...'
+    """
+    # 将输入转换为字节
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    elif isinstance(data, bytearray):
+        data = bytes(data)
+    elif not isinstance(data, bytes):
+        raise DxEncodingError("输入必须是 str、bytes 或 bytearray")
+
+    # 计算 CRC16
+    checksum = crc16(data)
+
+    # 构建头部（2字节 CRC16，大端序）
+    header = bytes([checksum >> 8, checksum & 0xFF])
+
+    # 合并头部和数据
+    combined = header + data
+
+    # 编码
+    return PREFIX + _encode_raw(combined)
+
+
+def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
+    """
+    将 DX 编码的字符串解码（带校验和验证）
+
+    参数:
+        encoded: DX 编码的字符串（必须以 'dx' 开头）
+        as_string: 是否返回字符串（默认 True）
+
+    返回:
+        解码后的字符串或字节
+
+    异常:
+        DxEncodingError: 如果输入不是有效的 DX 编码
+        DxChecksumError: 如果校验和不匹配
+
+    示例:
+        >>> dx_decode('dxXXXX...')
+        'Hello, Dogxi!'
+        >>> dx_decode('dxXXXX...', as_string=False)
+        b'Hello, Dogxi!'
+    """
+    # 验证前缀
+    if not encoded or not encoded.startswith(PREFIX):
+        raise DxEncodingError("无效的 DX 编码：缺少 dx 前缀")
+
+    # 移除前缀
+    data = encoded[len(PREFIX) :]
+
+    # 解码
+    combined = _decode_raw(data)
+
+    # 验证长度
+    if len(combined) < HEADER_SIZE:
+        raise DxEncodingError("无效的格式头部")
+
+    # 提取头部
+    expected_checksum = (combined[0] << 8) | combined[1]
+
+    # 提取数据
+    payload = combined[HEADER_SIZE:]
+
+    # 验证校验和
+    actual_checksum = crc16(payload)
+    if expected_checksum != actual_checksum:
+        raise DxChecksumError(expected_checksum, actual_checksum)
 
     if as_string:
         try:
-            return result_bytes.decode("utf-8")
+            return payload.decode("utf-8")
         except UnicodeDecodeError as e:
             raise DxEncodingError(f"解码后的数据不是有效的 UTF-8: {e}")
 
-    return result_bytes
+    return payload
 
 
 def is_dx_encoded(s: str) -> bool:
@@ -207,7 +305,7 @@ def is_dx_encoded(s: str) -> bool:
 
     data = s[len(PREFIX) :]
 
-    # 检查长度
+    # 检查长度（至少需要头部）
     if len(data) == 0 or len(data) % 4 != 0:
         return False
 
@@ -223,6 +321,70 @@ def is_dx_encoded(s: str) -> bool:
     return True
 
 
+def dx_verify(encoded: str) -> bool:
+    """
+    验证 DX 编码的校验和（不返回解码数据）
+
+    参数:
+        encoded: DX 编码的字符串
+
+    返回:
+        校验和是否匹配
+
+    异常:
+        DxEncodingError: 如果格式无效（非校验和错误）
+
+    示例:
+        >>> dx_verify('dxXXXX...')
+        True
+    """
+    try:
+        dx_decode(encoded, as_string=False)
+        return True
+    except DxChecksumError:
+        return False
+
+
+def get_checksum(encoded: str) -> Tuple[int, int]:
+    """
+    获取 DX 编码的校验和信息
+
+    参数:
+        encoded: DX 编码的字符串
+
+    返回:
+        (存储的校验和, 计算的校验和) 元组
+
+    异常:
+        DxEncodingError: 如果输入不是有效的 DX 编码
+
+    示例:
+        >>> stored, computed = get_checksum('dxXXXX...')
+        >>> stored == computed
+        True
+    """
+    # 验证前缀
+    if not encoded or not encoded.startswith(PREFIX):
+        raise DxEncodingError("无效的 DX 编码：缺少 dx 前缀")
+
+    # 移除前缀
+    data = encoded[len(PREFIX) :]
+
+    # 解码
+    combined = _decode_raw(data)
+
+    # 验证长度
+    if len(combined) < HEADER_SIZE:
+        raise DxEncodingError("无效的格式头部")
+
+    # 提取校验和
+    stored = (combined[0] << 8) | combined[1]
+    payload = combined[HEADER_SIZE:]
+    computed = crc16(payload)
+
+    return (stored, computed)
+
+
 def get_dx_info() -> dict:
     """
     获取 DX 编码的信息
@@ -232,12 +394,13 @@ def get_dx_info() -> dict:
     """
     return {
         "name": "DX Encoding",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "author": "Dogxi",
         "charset": DX_CHARSET,
         "prefix": PREFIX,
         "magic": MAGIC,
         "padding": PADDING,
+        "checksum": "CRC16-CCITT",
     }
 
 
@@ -245,6 +408,7 @@ def get_dx_info() -> dict:
 encode = dx_encode
 decode = dx_decode
 is_encoded = is_dx_encoded
+verify = dx_verify
 info = get_dx_info
 
 
@@ -252,17 +416,19 @@ def __main__():
     """命令行入口"""
     import sys
 
-    if len(sys.argv) < 3:
-        print("DX Encoding - 由 Dogxi 创造")
+    if len(sys.argv) < 2:
+        print("DX Encoding - 由 Dogxi 创造 (v2.0 带校验和)")
         print()
         print("用法:")
         print("  python dxcode.py encode <文本>")
         print("  python dxcode.py decode <编码>")
+        print("  python dxcode.py verify <编码>")
         print("  python dxcode.py info")
         print()
         print("示例:")
         print("  python dxcode.py encode 'Hello, Dogxi!'")
         print("  python dxcode.py decode 'dxXXXX...'")
+        print("  python dxcode.py verify 'dxXXXX...'")
         sys.exit(0)
 
     command = sys.argv[1].lower()
@@ -274,16 +440,42 @@ def __main__():
         print(f"作者: {info_data['author']}")
         print(f"前缀: {info_data['prefix']}")
         print(f"魔数: 0x{info_data['magic']:02X}")
+        print(f"校验和: {info_data['checksum']}")
         print(f"字符集: {info_data['charset']}")
     elif command == "encode":
+        if len(sys.argv) < 3:
+            print("错误: 请提供要编码的文本", file=sys.stderr)
+            sys.exit(1)
         text = sys.argv[2]
         encoded = dx_encode(text)
         print(encoded)
     elif command == "decode":
+        if len(sys.argv) < 3:
+            print("错误: 请提供要解码的字符串", file=sys.stderr)
+            sys.exit(1)
         encoded = sys.argv[2]
         try:
             decoded = dx_decode(encoded)
             print(decoded)
+        except DxEncodingError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif command == "verify":
+        if len(sys.argv) < 3:
+            print("错误: 请提供要验证的字符串", file=sys.stderr)
+            sys.exit(1)
+        encoded = sys.argv[2]
+        try:
+            if dx_verify(encoded):
+                stored, _ = get_checksum(encoded)
+                print(f"✅ 校验和验证通过")
+                print(f"   CRC16: 0x{stored:04X}")
+            else:
+                stored, computed = get_checksum(encoded)
+                print(f"❌ 校验和验证失败")
+                print(f"   存储的 CRC16: 0x{stored:04X}")
+                print(f"   计算的 CRC16: 0x{computed:04X}")
+                sys.exit(1)
         except DxEncodingError as e:
             print(f"错误: {e}", file=sys.stderr)
             sys.exit(1)

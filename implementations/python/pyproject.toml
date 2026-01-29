@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dxcode"
-version = "1.0.0"
-description = "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix."
+version = "2.0.0"
+description = "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix and CRC16 checksum."
 readme = "README.md"
 license = {text = "MIT"}
 authors = [

@@ -1,10 +1,10 @@
 //! dxcode 命令行工具
 //!
-//! 由 Dogxi 创建
+//! 由 Dogxi 创建 - v2.0.0
 
-use dxcode::{decode_str, encode_str, get_info, is_encoded};
+use dxcode::{decode_str, encode_str, get_checksum, get_info, is_encoded, verify};
 use std::env;
-use std::io::{self, BufRead, Read};
+use std::io::{self, Read};
 use std::process;
 
 fn print_version() {
@@ -12,12 +12,13 @@ fn print_version() {
 }
 
 fn print_help() {
-    println!("dxcode - 带有 `dx` 前缀的自定义编码算法");
+    println!("dxcode - 带有 `dx` 前缀的自定义编码算法 (v2.0 带校验和)");
     println!();
     println!("用法:");
     println!("  dxc encode <文本>     编码文本");
     println!("  dxc decode <编码>     解码 DX 字符串");
     println!("  dxc check <字符串>    检查是否为有效的 DX 编码");
+    println!("  dxc verify <编码>     验证校验和完整性");
     println!("  dxc info              显示编码信息");
     println!("  dxc help              显示帮助信息");
     println!("  dxc --version         显示版本信息");
@@ -29,6 +30,7 @@ fn print_help() {
     println!("示例:");
     println!("  dxc encode '你好，Dogxi！'");
     println!("  dxc decode 'dxXXXX...'");
+    println!("  dxc verify 'dxXXXX...'    # 验证数据完整性");
     println!();
     println!("更多信息: https://dxc.dogxi.me");
     println!("GitHub: https://github.com/dogxii/dxcode");
@@ -40,12 +42,13 @@ fn print_info() {
     println!("║             dxcode 信息                    ║");
     println!("╚════════════════════════════════════════════╝");
     println!();
-    println!("名称:     {}", info.name);
-    println!("版本:     {}", info.version);
-    println!("作者:     {}", info.author);
-    println!("前缀:     {}", info.prefix);
-    println!("魔数:     0x{:02X} ('{}')", info.magic, info.magic as char);
-    println!("填充:     {}", info.padding);
+    println!("名称:       {}", info.name);
+    println!("版本:       {}", info.version);
+    println!("作者:       {}", info.author);
+    println!("前缀:       {}", info.prefix);
+    println!("魔数:       0x{:02X} ('{}')", info.magic, info.magic as char);
+    println!("填充:       {}", info.padding);
+    println!("校验和:     {}", info.checksum);
     println!("字符集长度: {}", info.charset.len());
     println!();
     println!("字符集:");
@@ -74,6 +77,38 @@ fn check_command(input: &str) {
     } else {
         println!("❌ 不是有效的 DX 编码");
         process::exit(1);
+    }
+}
+
+fn verify_command(input: &str) {
+    let trimmed = input.trim();
+
+    match verify(trimmed) {
+        Ok(true) => {
+            // 获取校验和详情
+            if let Ok((stored, _computed)) = get_checksum(trimmed) {
+                println!("✅ 校验和验证通过");
+                println!("   CRC16: 0x{:04X}", stored);
+            } else {
+                println!("✅ 校验和验证通过");
+            }
+        }
+        Ok(false) => {
+            // 校验和不匹配
+            if let Ok((stored, computed)) = get_checksum(trimmed) {
+                println!("❌ 校验和验证失败");
+                println!("   存储的 CRC16: 0x{:04X}", stored);
+                println!("   计算的 CRC16: 0x{:04X}", computed);
+                println!("   数据可能已被篡改或损坏");
+            } else {
+                println!("❌ 校验和验证失败");
+            }
+            process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("错误: {}", e);
+            process::exit(1);
+        }
     }
 }
 
@@ -157,6 +192,20 @@ fn main() {
             }
 
             check_command(&input);
+        }
+        "verify" | "v" => {
+            let input = if args.len() > 2 {
+                args[2].clone()
+            } else {
+                read_stdin()
+            };
+
+            if input.is_empty() {
+                eprintln!("错误: 请提供要验证的 DX 字符串");
+                process::exit(1);
+            }
+
+            verify_command(&input);
         }
         _ => {
             // 如果第一个参数不是命令，尝试将其作为要编码的文本
