@@ -532,7 +532,7 @@
           <div class="install-method">
             <span class="install-label">curl</span>
             <code class="install-cmd"
-              >curl -fsSL https://dxc.dogxi.me/install.sh | sh</code
+              >curl -fsSL https://cdn.dogxi.me/dxcode_install.sh | sh</code
             >
           </div>
           <div class="install-method">

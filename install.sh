@@ -3,10 +3,10 @@
 # 由 Dogxi 创建
 #
 # 使用方法:
-#   curl -fsSL https://dxc.dogxi.me/install.sh | sh
+#   curl -fsSL https://cdn.dogxi.me/dxcode_install.sh | sh
 #
 # 或者先下载后审查再执行:
-#   curl -fsSL https://dxc.dogxi.me/install.sh -o install.sh
+#   curl -fsSL https://cdn.dogxi.me/dxcode_install.sh -o install.sh
 #   cat install.sh
 #   sh install.sh
 

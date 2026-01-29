@@ -32,7 +32,7 @@ brew install dogxii/tap/dxcode
 cargo install dxcode
 
 # curl 一键安装 (自动下载预编译二进制)
-curl -fsSL https://dxc.dogxi.me/install.sh | sh
+curl -fsSL https://cdn.dogxi.me/dxcode_install.sh | sh
 ```
 
 使用示例：
