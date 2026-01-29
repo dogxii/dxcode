@@ -17,22 +17,12 @@ brew install dxcode
 brew install dogxii/tap/dxcode
 ```
 
-### 备选方式 (Node.js 版本)
-
-如果你更偏好 Node.js 版本：
-
-```bash
-brew install dogxii/tap/dxcode-cli
-```
-
 ## 性能对比
 
 | 版本                 | 启动时间 | 内存占用 | 依赖    |
 | -------------------- | -------- | -------- | ------- |
 | Rust (dxcode)        | ~2ms     | ~1MB     | 无      |
 | Node.js (dxcode-cli) | ~150ms   | ~30MB    | Node.js |
-
-**强烈推荐使用 Rust 版本**，它是原生编译的二进制文件，启动更快、内存占用更低、无需任何运行时依赖。
 
 ## 使用
 
