@@ -1,7 +1,9 @@
 {
 	"name": "dxcode",
 	"version": "1.0.0",
-	"description": "DX 编码算法 - 由 Dogxi 创造的独特编码方案",
+	"description": "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix.",
+	"author": "Dogxi",
+	"license": "MIT",
 	"main": "dxcode.js",
 	"module": "dxcode.mjs",
 	"types": "dxcode.d.ts",
@@ -31,8 +33,6 @@
 		"binary",
 		"text"
 	],
-	"author": "Dogxi",
-	"license": "MIT",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/dogxii/dxcode.git"

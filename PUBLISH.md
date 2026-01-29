@@ -54,7 +54,7 @@ npm search dxcode
 {
   "name": "dxcode",
   "version": "1.0.0",
-  "description": "DX 编码算法 - 由 Dogxi 创造的独特编码方案",
+  "description": "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix.",
   "main": "dx-encoding.js",
   "types": "dx-encoding.d.ts",
   "author": "Dogxi",
@@ -257,11 +257,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dxcode"
 version = "1.0.0"
-description = "DX 编码算法 - 由 Dogxi 创造的独特编码方案"
+description = "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix."
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Dogxi", email = "your-email@example.com"}
+    {name = "Dogxi", email = "hi@dogxi.me"}
 ]
 keywords = ["dx", "dxcode", "encoding", "base64", "dogxi", "binary", "text"]
 classifiers = [
@@ -431,7 +431,7 @@ name = "dxcode"
 version = "1.0.0"
 edition = "2021"
 authors = ["Dogxi"]
-description = "DX 编码算法 - 由 Dogxi 创造的独特编码方案"
+description = "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix."
 license = "MIT"
 repository = "https://github.com/dogxii/dxcode"
 homepage = "https://dxc.dogxi.me"

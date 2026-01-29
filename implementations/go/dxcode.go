@@ -1,4 +1,4 @@
-// Package dx 提供 DX 编码算法的 Go 实现
+// Package dx 提供 DXCode 编码算法的 Go 实现
 //
 // # DX 编码是由 Dogxi 创造的独特编码算法
 //

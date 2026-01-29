@@ -136,11 +136,7 @@
         <span class="hero-dx">DX</span> Encoding
       </h1>
 
-      <p class="hero-desc">
-        由 <a href="https://github.com/dogxiii" target="_blank" rel="noopener"
-          >Dogxi</a
-        > 创造的独特编码算法
-      </p>
+      <p class="hero-desc">一个带有 `dx` 前缀的独特的二进制编码器</p>
 
       <div class="hero-features">
         <div class="feature-tag">
