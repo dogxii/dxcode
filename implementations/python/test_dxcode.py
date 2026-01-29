@@ -1,7 +1,7 @@
 """
 dxcode 测试文件
 由 Dogxi 创建
-v2.1 - 带 CRC16 校验和和智能压缩支持
+v2.3 - 带 CRC16 校验和、智能压缩和 TTL 支持
 """
 
 import unittest
@@ -14,14 +14,20 @@ from dxcode import (
     PREFIX,
     DxChecksumError,
     DxEncodingError,
+    DxTtlExpiredError,
+    TtlInfo,
     crc16,
     dx_decode,
     dx_encode,
+    dx_encode_with_ttl,
     dx_verify,
     get_checksum,
     get_dx_info,
+    get_ttl_info,
+    has_ttl,
     is_compressed,
     is_dx_encoded,
+    is_expired,
 )
 
 
@@ -398,7 +404,7 @@ class TestGetDxInfo(unittest.TestCase):
         """测试信息值"""
         info = get_dx_info()
         self.assertEqual(info["name"], "DX Encoding")
-        self.assertEqual(info["version"], "2.2.0")
+        self.assertEqual(info["version"], "2.3.0")
         self.assertEqual(info["author"], "Dogxi")
         self.assertEqual(info["prefix"], "dx")
         self.assertEqual(info["magic"], 0x44)
@@ -431,6 +437,68 @@ class TestConstants(unittest.TestCase):
     def test_padding(self):
         """测试填充字符"""
         self.assertEqual(PADDING, "=")
+
+
+class TestTtl(unittest.TestCase):
+    """TTL 功能测试类"""
+
+    def test_encode_with_ttl(self):
+        """测试带 TTL 的编码"""
+        encoded = dx_encode_with_ttl("Hello TTL", 3600)
+        self.assertTrue(encoded.startswith("dx"))
+        self.assertTrue(has_ttl(encoded))
+
+    def test_decode_with_ttl(self):
+        """测试带 TTL 的解码"""
+        encoded = dx_encode_with_ttl("Secret Data", 3600)
+        decoded = dx_decode(encoded)
+        self.assertEqual(decoded, "Secret Data")
+
+    def test_ttl_info(self):
+        """测试 TTL 信息获取"""
+        encoded = dx_encode_with_ttl("Test", 7200)
+        info = get_ttl_info(encoded)
+        self.assertIsNotNone(info)
+        self.assertEqual(info.ttl_seconds, 7200)
+        self.assertFalse(info.is_expired)
+        self.assertIsNotNone(info.expires_at)
+
+    def test_ttl_zero_never_expires(self):
+        """测试 TTL 为 0 永不过期"""
+        encoded = dx_encode_with_ttl("Forever", 0)
+        info = get_ttl_info(encoded)
+        self.assertIsNotNone(info)
+        self.assertEqual(info.ttl_seconds, 0)
+        self.assertIsNone(info.expires_at)
+        self.assertFalse(info.is_expired)
+        self.assertFalse(is_expired(encoded))
+
+    def test_no_ttl_returns_none(self):
+        """测试无 TTL 返回 None"""
+        encoded = dx_encode("No TTL")
+        self.assertFalse(has_ttl(encoded))
+        self.assertIsNone(get_ttl_info(encoded))
+        self.assertFalse(is_expired(encoded))
+
+    def test_ttl_with_compression(self):
+        """测试 TTL 与压缩组合"""
+        original = "Repeated data for compression. " * 10
+        encoded = dx_encode_with_ttl(original, 86400)
+        self.assertTrue(has_ttl(encoded))
+        decoded = dx_decode(encoded)
+        self.assertEqual(decoded, original)
+
+    def test_decode_skip_ttl_check(self):
+        """测试跳过 TTL 检查解码"""
+        encoded = dx_encode_with_ttl("Data", 1)
+        # 跳过 TTL 检查
+        decoded = dx_decode(encoded, as_string=True, check_ttl=False)
+        self.assertEqual(decoded, "Data")
+
+    def test_is_expired_function(self):
+        """测试 is_expired 函数"""
+        encoded = dx_encode_with_ttl("Data", 86400)  # 1天
+        self.assertFalse(is_expired(encoded))
 
 
 class TestRoundTrip(unittest.TestCase):

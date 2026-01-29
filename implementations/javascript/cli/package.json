@@ -1,6 +1,6 @@
 {
 	"name": "dxcode-cli",
-	"version": "2.2.0",
+	"version": "2.3.0",
 	"description": "DX Encoding CLI - 命令行编码解码工具",
 	"bin": {
 		"dxc": "./index.js"
@@ -37,6 +37,6 @@
 		"node": ">=12.0.0"
 	},
 	"dependencies": {
-		"dxcode-lib": "^2.2.0"
+		"dxcode-lib": "^2.3.0"
 	}
 }

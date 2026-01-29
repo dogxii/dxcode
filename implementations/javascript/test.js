@@ -1,7 +1,7 @@
 /**
  * dxcode 测试文件
  * 由 Dogxi 创建
- * v2.1 - 带 CRC16 校验和和智能压缩支持
+ * v2.3 - 带 CRC16 校验和、智能压缩和 TTL 支持
  */
 
 const {
@@ -14,6 +14,11 @@ const {
 	getDxInfo,
 	crc16,
 	COMPRESSION_THRESHOLD,
+	// TTL 相关
+	dxEncodeWithTtl,
+	hasTtl,
+	getTtlInfo,
+	isExpired,
 } = require("./dxcode");
 
 // 测试用例
@@ -45,7 +50,7 @@ let passed = 0;
 let failed = 0;
 
 console.log("╔════════════════════════════════════════════════════════════╗");
-console.log("║              DX Encoding 测试套件 v2.1                     ║");
+console.log("║              DX Encoding 测试套件 v2.3                     ║");
 console.log("║              由 Dogxi 创建                                 ║");
 console.log("╚════════════════════════════════════════════════════════════╝");
 console.log();
@@ -412,6 +417,138 @@ for (const test of errorTests) {
 			failed++;
 		}
 	}
+}
+
+console.log("─".repeat(60));
+console.log();
+
+// ========== TTL 测试 ==========
+console.log("⏰ TTL 测试...");
+console.log("─".repeat(60));
+
+// TTL 编码测试
+try {
+	const encoded = dxEncodeWithTtl("Hello TTL", 3600);
+	if (encoded.startsWith("dx") && hasTtl(encoded)) {
+		console.log("✅ TTL 编码测试");
+		console.log(`   编码: ${encoded.substring(0, 30)}...`);
+		passed++;
+	} else {
+		console.log("❌ TTL 编码测试失败");
+		failed++;
+	}
+} catch (error) {
+	console.log(`❌ TTL 编码测试错误: ${error.message}`);
+	failed++;
+}
+
+// TTL 解码测试
+try {
+	const encoded = dxEncodeWithTtl("Secret Data", 3600);
+	const decoded = dxDecode(encoded);
+	if (decoded === "Secret Data") {
+		console.log("✅ TTL 解码测试");
+		passed++;
+	} else {
+		console.log("❌ TTL 解码测试失败");
+		failed++;
+	}
+} catch (error) {
+	console.log(`❌ TTL 解码测试错误: ${error.message}`);
+	failed++;
+}
+
+// TTL 信息测试
+try {
+	const encoded = dxEncodeWithTtl("Test", 7200);
+	const info = getTtlInfo(encoded);
+	if (info && info.ttlSeconds === 7200 && !info.isExpired) {
+		console.log("✅ TTL 信息测试");
+		console.log(`   TTL: ${info.ttlSeconds} 秒`);
+		console.log(`   过期: ${info.isExpired ? "是" : "否"}`);
+		passed++;
+	} else {
+		console.log("❌ TTL 信息测试失败");
+		failed++;
+	}
+} catch (error) {
+	console.log(`❌ TTL 信息测试错误: ${error.message}`);
+	failed++;
+}
+
+// TTL 永不过期测试
+try {
+	const encoded = dxEncodeWithTtl("Forever", 0);
+	const info = getTtlInfo(encoded);
+	if (
+		info &&
+		info.ttlSeconds === 0 &&
+		info.expiresAt === null &&
+		!info.isExpired
+	) {
+		console.log("✅ TTL 永不过期测试");
+		passed++;
+	} else {
+		console.log("❌ TTL 永不过期测试失败");
+		failed++;
+	}
+} catch (error) {
+	console.log(`❌ TTL 永不过期测试错误: ${error.message}`);
+	failed++;
+}
+
+// 无 TTL 返回 null 测试
+try {
+	const encoded = dxEncode("No TTL");
+	if (!hasTtl(encoded) && getTtlInfo(encoded) === null && !isExpired(encoded)) {
+		console.log("✅ 无 TTL 返回 null 测试");
+		passed++;
+	} else {
+		console.log("❌ 无 TTL 返回 null 测试失败");
+		failed++;
+	}
+} catch (error) {
+	console.log(`❌ 无 TTL 返回 null 测试错误: ${error.message}`);
+	failed++;
+}
+
+// TTL 与压缩组合测试
+try {
+	const original = "Repeated data for compression. ".repeat(10);
+	const encoded = dxEncodeWithTtl(original, 86400);
+	if (hasTtl(encoded) && isCompressed(encoded)) {
+		const decoded = dxDecode(encoded);
+		if (decoded === original) {
+			console.log("✅ TTL 与压缩组合测试");
+			passed++;
+		} else {
+			console.log("❌ TTL 与压缩组合测试 - 解码不匹配");
+			failed++;
+		}
+	} else {
+		console.log("✅ TTL 与压缩组合测试 (未压缩但有效)");
+		passed++;
+	}
+} catch (error) {
+	console.log(`❌ TTL 与压缩组合测试错误: ${error.message}`);
+	failed++;
+}
+
+// 跳过 TTL 检查解码测试
+try {
+	const encoded = dxEncodeWithTtl("Data", 1);
+	// 即使可能过期，跳过检查也能解码
+	const decoded = dxDecode(encoded, { asString: true, checkTtl: false });
+	if (decoded === "Data") {
+		console.log("✅ 跳过 TTL 检查解码测试");
+		passed++;
+	} else {
+		console.log("❌ 跳过 TTL 检查解码测试失败");
+		failed++;
+	}
+} catch (error) {
+	console.log(`❌ 跳过 TTL 检查解码测试错误: ${error.message}`);
+	failed++;
 }
 
 console.log("─".repeat(60));

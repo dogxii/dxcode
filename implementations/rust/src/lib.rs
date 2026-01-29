@@ -26,7 +26,7 @@
 //!
 //! # 版本
 //!
-//! 2.2.0
+//! 2.3.0
 //!
 //! # 许可证
 //!
@@ -53,8 +53,11 @@ pub const PREFIX: &str = "dx";
 /// 填充字符
 pub const PADDING: char = '=';
 
-/// 头部大小（1字节 flags + 2字节 CRC16）
+/// 基础头部大小（1字节 flags + 2字节 CRC16）
 const HEADER_SIZE: usize = 3;
+
+/// TTL 头部大小（4字节 created_at + 4字节 ttl_seconds）
+const TTL_HEADER_SIZE: usize = 8;
 
 /// 压缩阈值（字节数），小于此值不压缩
 const COMPRESSION_THRESHOLD: usize = 32;
@@ -62,6 +65,10 @@ const COMPRESSION_THRESHOLD: usize = 32;
 /// Flags 位定义
 const FLAG_COMPRESSED: u8 = 0x01;
 const FLAG_ALGO_DEFLATE: u8 = 0x02;
+const FLAG_HAS_TTL: u8 = 0x04;
+
+/// 有效的 flags 掩码（用于验证）
+const VALID_FLAGS_MASK: u8 = FLAG_COMPRESSED | FLAG_ALGO_DEFLATE | FLAG_HAS_TTL;
 
 /// 字符集字节数组
 static CHARSET_BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| CHARSET.as_bytes().to_vec());
@@ -111,6 +118,12 @@ pub enum DxError {
     CompressionError(String),
     /// 无效的 flags
     InvalidFlags(u8),
+    /// TTL 已过期
+    TtlExpired {
+        created_at: u64,
+        ttl_seconds: u32,
+        expired_at: u64,
+    },
 }
 
 impl fmt::Display for DxError {
@@ -130,9 +143,21 @@ impl fmt::Display for DxError {
             DxError::InvalidHeader => write!(f, "无效的格式头部"),
             DxError::CompressionError(s) => write!(f, "压缩/解压缩错误：{}", s),
             DxError::InvalidFlags(flags) => write!(f, "无效的 flags 字节：0x{:02X}", flags),
+            DxError::TtlExpired {
+                created_at,
+                ttl_seconds,
+                expired_at,
+            } => {
+                write!(
+                    f,
+                    "TTL 已过期：创建于 {}，有效期 {} 秒，已于 {} 过期",
+                    created_at, ttl_seconds, expired_at
+                )
+            }
         }
     }
 }
+
 
 impl Error for DxError {}
 
@@ -422,6 +447,20 @@ pub fn encode_str_with_options(s: &str, allow_compression: bool) -> String {
 /// assert_eq!(decoded, b"Hello");
 /// ```
 pub fn decode(encoded: &str) -> Result<Vec<u8>> {
+    decode_with_options(encoded, true)
+}
+
+/// 将 DX 编码的字符串解码为字节数组，可选择是否检查 TTL
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+/// * `check_ttl` - 是否检查 TTL 过期（如果为 true 且 TTL 已过期则返回错误）
+///
+/// # 返回值
+///
+/// 解码后的字节数组，如果输入无效或校验和不匹配则返回错误
+pub fn decode_with_options(encoded: &str, check_ttl: bool) -> Result<Vec<u8>> {
     // 验证前缀
     if !encoded.starts_with(PREFIX) {
         return Err(DxError::InvalidPrefix);
@@ -443,15 +482,58 @@ pub fn decode(encoded: &str) -> Result<Vec<u8>> {
     let expected_checksum = ((combined[1] as u16) << 8) | (combined[2] as u16);
 
     // 验证 flags 的保留位
-    if flags & 0xFC != 0 && flags & 0xFC != FLAG_ALGO_DEFLATE {
-        // 允许 flags 为 0x00, 0x01, 0x02, 0x03
-        if flags > 0x03 {
-            return Err(DxError::InvalidFlags(flags));
-        }
+    if flags & !VALID_FLAGS_MASK != 0 {
+        return Err(DxError::InvalidFlags(flags));
     }
 
+    // 确定 payload 的起始位置
+    let payload_start = if flags & FLAG_HAS_TTL != 0 {
+        // 验证有 TTL 头部的最小长度
+        if combined.len() < HEADER_SIZE + TTL_HEADER_SIZE {
+            return Err(DxError::InvalidHeader);
+        }
+
+        // 如果需要检查 TTL
+        if check_ttl {
+            let created_at = u32::from_be_bytes([
+                combined[HEADER_SIZE],
+                combined[HEADER_SIZE + 1],
+                combined[HEADER_SIZE + 2],
+                combined[HEADER_SIZE + 3],
+            ]) as u64;
+
+            let ttl_seconds = u32::from_be_bytes([
+                combined[HEADER_SIZE + 4],
+                combined[HEADER_SIZE + 5],
+                combined[HEADER_SIZE + 6],
+                combined[HEADER_SIZE + 7],
+            ]);
+
+            // 检查是否过期
+            if ttl_seconds > 0 {
+                let expires_at = created_at + ttl_seconds as u64;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                if now > expires_at {
+                    return Err(DxError::TtlExpired {
+                        created_at,
+                        ttl_seconds,
+                        expired_at: expires_at,
+                    });
+                }
+            }
+        }
+
+        HEADER_SIZE + TTL_HEADER_SIZE
+    } else {
+        HEADER_SIZE
+    };
+
     // 提取数据部分
-    let payload = &combined[HEADER_SIZE..];
+    let payload = &combined[payload_start..];
 
     // 根据 flags 决定是否需要解压缩
     let original_data = if flags & FLAG_COMPRESSED != 0 {
@@ -503,7 +585,21 @@ pub fn decode(encoded: &str) -> Result<Vec<u8>> {
 /// assert_eq!(decoded, "你好，Dogxi！");
 /// ```
 pub fn decode_str(encoded: &str) -> Result<String> {
-    let bytes = decode(encoded)?;
+    decode_str_with_options(encoded, true)
+}
+
+/// 将 DX 编码的字符串解码为字符串，可选择是否检查 TTL
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+/// * `check_ttl` - 是否检查 TTL 过期
+///
+/// # 返回值
+///
+/// 解码后的字符串
+pub fn decode_str_with_options(encoded: &str, check_ttl: bool) -> Result<String> {
+    let bytes = decode_with_options(encoded, check_ttl)?;
     String::from_utf8(bytes).map_err(|e| DxError::Utf8Error(e.to_string()))
 }
 
@@ -683,6 +779,267 @@ pub fn is_compressed(encoded: &str) -> Result<bool> {
     Ok(flags & FLAG_COMPRESSED != 0)
 }
 
+/// TTL 信息
+#[derive(Debug, Clone)]
+pub struct TtlInfo {
+    /// 创建时间（Unix 时间戳，秒）
+    pub created_at: u64,
+    /// 有效期（秒），0 表示永不过期
+    pub ttl_seconds: u32,
+    /// 过期时间（Unix 时间戳，秒），None 表示永不过期
+    pub expires_at: Option<u64>,
+    /// 是否已过期
+    pub is_expired: bool,
+}
+
+/// 检查编码是否包含 TTL 信息
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+///
+/// # 返回值
+///
+/// 返回 `true` 如果包含 TTL，否则返回 `false`
+pub fn has_ttl(encoded: &str) -> Result<bool> {
+    // 验证前缀
+    if !encoded.starts_with(PREFIX) {
+        return Err(DxError::InvalidPrefix);
+    }
+
+    // 移除前缀
+    let data = &encoded[PREFIX.len()..];
+
+    // 解码
+    let combined = decode_raw(data)?;
+
+    // 验证长度
+    if combined.len() < HEADER_SIZE {
+        return Err(DxError::InvalidHeader);
+    }
+
+    // 检查 flags
+    let flags = combined[0];
+    Ok(flags & FLAG_HAS_TTL != 0)
+}
+
+/// 获取编码的 TTL 信息
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+///
+/// # 返回值
+///
+/// 如果编码包含 TTL 信息，返回 `Some(TtlInfo)`，否则返回 `None`
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::{encode_with_ttl, get_ttl_info};
+///
+/// let encoded = encode_with_ttl(b"Hello", 3600); // 1小时有效期
+/// if let Some(info) = get_ttl_info(&encoded).unwrap() {
+///     println!("创建于: {}", info.created_at);
+///     println!("过期: {}", info.is_expired);
+/// }
+/// ```
+pub fn get_ttl_info(encoded: &str) -> Result<Option<TtlInfo>> {
+    // 验证前缀
+    if !encoded.starts_with(PREFIX) {
+        return Err(DxError::InvalidPrefix);
+    }
+
+    // 移除前缀
+    let data = &encoded[PREFIX.len()..];
+
+    // 解码
+    let combined = decode_raw(data)?;
+
+    // 验证长度
+    if combined.len() < HEADER_SIZE {
+        return Err(DxError::InvalidHeader);
+    }
+
+    let flags = combined[0];
+
+    // 检查是否有 TTL
+    if flags & FLAG_HAS_TTL == 0 {
+        return Ok(None);
+    }
+
+    // 验证有 TTL 头部的最小长度
+    if combined.len() < HEADER_SIZE + TTL_HEADER_SIZE {
+        return Err(DxError::InvalidHeader);
+    }
+
+    // 提取 TTL 信息
+    let created_at = u32::from_be_bytes([
+        combined[HEADER_SIZE],
+        combined[HEADER_SIZE + 1],
+        combined[HEADER_SIZE + 2],
+        combined[HEADER_SIZE + 3],
+    ]) as u64;
+
+    let ttl_seconds = u32::from_be_bytes([
+        combined[HEADER_SIZE + 4],
+        combined[HEADER_SIZE + 5],
+        combined[HEADER_SIZE + 6],
+        combined[HEADER_SIZE + 7],
+    ]);
+
+    // 计算过期时间和状态
+    let (expires_at, is_expired) = if ttl_seconds == 0 {
+        (None, false)
+    } else {
+        let expires = created_at + ttl_seconds as u64;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        (Some(expires), now > expires)
+    };
+
+    Ok(Some(TtlInfo {
+        created_at,
+        ttl_seconds,
+        expires_at,
+        is_expired,
+    }))
+}
+
+/// 检查编码是否已过期
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+///
+/// # 返回值
+///
+/// 返回 `true` 如果已过期或没有 TTL，否则返回 `false`
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::{encode_with_ttl, is_expired};
+///
+/// let encoded = encode_with_ttl(b"Hello", 3600);
+/// assert!(!is_expired(&encoded).unwrap()); // 还没过期
+/// ```
+pub fn is_expired(encoded: &str) -> Result<bool> {
+    match get_ttl_info(encoded)? {
+        Some(info) => Ok(info.is_expired),
+        None => Ok(false), // 没有 TTL 的数据永不过期
+    }
+}
+
+/// 使用 TTL 编码字节数据
+///
+/// # 参数
+///
+/// * `data` - 要编码的字节数据
+/// * `ttl_seconds` - 有效期（秒），0 表示永不过期
+///
+/// # 返回值
+///
+/// 带有 TTL 的 DX 编码字符串
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::encode_with_ttl;
+///
+/// // 编码数据，1小时后过期
+/// let encoded = encode_with_ttl(b"Secret Data", 3600);
+/// assert!(encoded.starts_with("dx"));
+/// ```
+pub fn encode_with_ttl(data: &[u8], ttl_seconds: u32) -> String {
+    encode_with_ttl_and_options(data, ttl_seconds, true)
+}
+
+/// 使用 TTL 编码字节数据，可选择是否启用压缩
+///
+/// # 参数
+///
+/// * `data` - 要编码的字节数据
+/// * `ttl_seconds` - 有效期（秒），0 表示永不过期
+/// * `allow_compression` - 是否允许压缩
+///
+/// # 返回值
+///
+/// 带有 TTL 的 DX 编码字符串
+pub fn encode_with_ttl_and_options(data: &[u8], ttl_seconds: u32, allow_compression: bool) -> String {
+    // 获取当前时间戳
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as u32)
+        .unwrap_or(0);
+
+    // 计算原始数据的 CRC16
+    let checksum = crc16(data);
+
+    // 决定是否压缩
+    let (mut flags, payload) = if allow_compression && data.len() >= COMPRESSION_THRESHOLD {
+        match compress_deflate(data) {
+            Ok(compressed) => {
+                if compressed.len() + 2 < data.len() && data.len() <= 65535 {
+                    let mut payload = Vec::with_capacity(2 + compressed.len());
+                    payload.push((data.len() >> 8) as u8);
+                    payload.push((data.len() & 0xFF) as u8);
+                    payload.extend_from_slice(&compressed);
+                    (FLAG_COMPRESSED | FLAG_ALGO_DEFLATE, payload)
+                } else {
+                    (0u8, data.to_vec())
+                }
+            }
+            Err(_) => (0u8, data.to_vec()),
+        }
+    } else {
+        (0u8, data.to_vec())
+    };
+
+    // 设置 TTL flag
+    flags |= FLAG_HAS_TTL;
+
+    // 构建完整数据：[flags(1)] [CRC16(2)] [created_at(4)] [ttl(4)] [payload]
+    let mut combined = Vec::with_capacity(HEADER_SIZE + TTL_HEADER_SIZE + payload.len());
+    combined.push(flags);
+    combined.push((checksum >> 8) as u8);
+    combined.push((checksum & 0xFF) as u8);
+    combined.extend_from_slice(&created_at.to_be_bytes());
+    combined.extend_from_slice(&ttl_seconds.to_be_bytes());
+    combined.extend_from_slice(&payload);
+
+    // 编码
+    let mut result = String::with_capacity(PREFIX.len() + (combined.len() + 2) / 3 * 4);
+    result.push_str(PREFIX);
+    result.push_str(&encode_raw(&combined));
+    result
+}
+
+/// 使用 TTL 编码字符串
+///
+/// # 参数
+///
+/// * `s` - 要编码的字符串
+/// * `ttl_seconds` - 有效期（秒），0 表示永不过期
+///
+/// # 返回值
+///
+/// 带有 TTL 的 DX 编码字符串
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::encode_str_with_ttl;
+///
+/// // 编码字符串，30分钟后过期
+/// let encoded = encode_str_with_ttl("临时令牌", 1800);
+/// ```
+pub fn encode_str_with_ttl(s: &str, ttl_seconds: u32) -> String {
+    encode_with_ttl(s.as_bytes(), ttl_seconds)
+}
+
 /// DX 编码信息
 #[derive(Debug, Clone)]
 pub struct Info {
@@ -716,7 +1073,7 @@ pub struct Info {
 pub fn get_info() -> Info {
     Info {
         name: "DX Encoding",
-        version: "2.2.0",
+        version: "2.3.0",
         author: "Dogxi",
         charset: CHARSET,
         prefix: PREFIX,
@@ -843,7 +1200,7 @@ mod tests {
         assert_eq!(info.prefix, "dx");
         assert_eq!(info.magic, 0x44);
         assert_eq!(info.charset.len(), 64);
-        assert_eq!(info.version, "2.2.0");
+        assert_eq!(info.version, "2.3.0");
         assert_eq!(info.checksum, "CRC16-CCITT");
         assert_eq!(info.compression, "DEFLATE");
     }
@@ -979,5 +1336,113 @@ mod tests {
 
         // 验证校验和
         assert!(verify(&encoded).unwrap());
+    }
+
+    // ========== TTL 测试 ==========
+
+    #[test]
+    fn test_encode_with_ttl() {
+        let original = b"Secret Data";
+        let encoded = encode_with_ttl(original, 3600); // 1小时有效期
+
+        assert!(encoded.starts_with("dx"));
+
+        // 验证包含 TTL
+        assert!(has_ttl(&encoded).unwrap());
+
+        // 验证能正确解码
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_encode_str_with_ttl() {
+        let original = "临时令牌";
+        let encoded = encode_str_with_ttl(original, 1800); // 30分钟
+
+        assert!(has_ttl(&encoded).unwrap());
+
+        let decoded = decode_str(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_ttl_info() {
+        let encoded = encode_with_ttl(b"Test", 3600);
+
+        let info = get_ttl_info(&encoded).unwrap().unwrap();
+        assert_eq!(info.ttl_seconds, 3600);
+        assert!(!info.is_expired);
+        assert!(info.expires_at.is_some());
+
+        // created_at 应该在最近几秒内
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(info.created_at <= now && info.created_at >= now - 5);
+    }
+
+    #[test]
+    fn test_ttl_zero_never_expires() {
+        let encoded = encode_with_ttl(b"Forever", 0); // 永不过期
+
+        let info = get_ttl_info(&encoded).unwrap().unwrap();
+        assert_eq!(info.ttl_seconds, 0);
+        assert!(info.expires_at.is_none());
+        assert!(!info.is_expired);
+        assert!(!is_expired(&encoded).unwrap());
+    }
+
+    #[test]
+    fn test_no_ttl_returns_none() {
+        let encoded = encode(b"No TTL");
+
+        assert!(!has_ttl(&encoded).unwrap());
+        assert!(get_ttl_info(&encoded).unwrap().is_none());
+        assert!(!is_expired(&encoded).unwrap());
+    }
+
+    #[test]
+    fn test_ttl_with_compression() {
+        // 长数据应该被压缩
+        let original = "Repeated data for compression test. ".repeat(50);
+        let encoded = encode_str_with_ttl(&original, 7200);
+
+        // 验证 TTL 和压缩都存在
+        assert!(has_ttl(&encoded).unwrap());
+        assert!(is_compressed(&encoded).unwrap());
+
+        // 验证能正确解码
+        let decoded = decode_str(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_ttl_without_compression() {
+        let original = "Short";
+        let encoded = encode_with_ttl_and_options(original.as_bytes(), 3600, false);
+
+        assert!(has_ttl(&encoded).unwrap());
+        assert!(!is_compressed(&encoded).unwrap());
+
+        let decoded = decode_str(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_decode_skip_ttl_check() {
+        // 即使 TTL 存在，也可以跳过检查
+        let encoded = encode_with_ttl(b"Data", 1);
+
+        // 使用 decode_with_options 跳过 TTL 检查
+        let decoded = decode_with_options(&encoded, false).unwrap();
+        assert_eq!(decoded, b"Data");
+    }
+
+    #[test]
+    fn test_is_expired_function() {
+        let encoded = encode_with_ttl(b"Data", 86400); // 1天有效期
+        assert!(!is_expired(&encoded).unwrap());
     }
 }

@@ -4,12 +4,13 @@
  * TypeScript 实现 - 用于 dxc.dogxi.me 网站
  *
  * @author Dogxi
- * @version 2.2.0
+ * @version 2.3.0
  * @license MIT
  *
  * v2.0 新增: CRC16-CCITT 校验和支持
  * v2.1 新增: 智能 DEFLATE 压缩支持
  * v2.2 新增: 使用 pako 实现真正的 DEFLATE 压缩
+ * v2.3 新增: TTL (Time-To-Live) 过期时间支持
  */
 
 // DX 字符集 - 以 DXdx 开头作为签名，共64个字符
@@ -34,6 +35,13 @@ export const COMPRESSION_THRESHOLD = 32;
 // Flags 位定义
 const FLAG_COMPRESSED = 0x01;
 const FLAG_ALGO_DEFLATE = 0x02;
+const FLAG_HAS_TTL = 0x04;
+
+// 有效的 flags 掩码
+const VALID_FLAGS_MASK = FLAG_COMPRESSED | FLAG_ALGO_DEFLATE | FLAG_HAS_TTL;
+
+// TTL 头部大小（4字节 created_at + 4字节 ttl_seconds）
+const TTL_HEADER_SIZE = 8;
 
 // 构建反向查找表
 const DX_DECODE_MAP: Record<string, number> = {};
@@ -685,7 +693,7 @@ export interface DxInfo {
 export function getDxInfo(): DxInfo {
 	return {
 		name: "DX Encoding",
-		version: "2.2.0",
+		version: "2.3.0",
 		author: "Dogxi",
 		charset: DX_CHARSET,
 		prefix: PREFIX,

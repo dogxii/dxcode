@@ -1,6 +1,6 @@
 [package]
 name = "dxcode"
-version = "2.2.0"
+version = "2.3.0"
 edition = "2021"
 authors = ["Dogxi"]
 description = "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix."

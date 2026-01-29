@@ -4,15 +4,18 @@ DX Encoding - 带有 `dx` 前缀的自定义编码算法
 Python 实现
 
 作者: Dogxi
-版本: 2.1.0
+版本: 2.3.0
 许可证: MIT
 
 v2.0 新增: CRC16-CCITT 校验和支持
 v2.1 新增: 智能 DEFLATE 压缩支持
+v2.3 新增: TTL (Time-To-Live) 过期时间支持
 """
 
+import time
 import zlib
-from typing import Tuple, Union
+from dataclasses import dataclass
+from typing import Optional, Tuple, Union
 
 # DX 字符集 - 以 DXdx 开头作为签名，共64个字符
 DX_CHARSET = "DXdx0123456789ABCEFGHIJKLMNOPQRSTUVWYZabcefghijklmnopqrstuvwyz-_"
@@ -35,6 +38,13 @@ COMPRESSION_THRESHOLD = 32
 # Flags 位定义
 FLAG_COMPRESSED = 0x01
 FLAG_ALGO_DEFLATE = 0x02
+FLAG_HAS_TTL = 0x04
+
+# 有效的 flags 掩码
+VALID_FLAGS_MASK = FLAG_COMPRESSED | FLAG_ALGO_DEFLATE | FLAG_HAS_TTL
+
+# TTL 头部大小（4字节 created_at + 4字节 ttl_seconds）
+TTL_HEADER_SIZE = 8
 
 # 构建反向查找表
 DX_DECODE_MAP = {char: idx for idx, char in enumerate(DX_CHARSET)}
@@ -70,6 +80,35 @@ class DxCompressionError(DxEncodingError):
     """DX 压缩/解压缩错误"""
 
     pass
+
+
+class DxTtlExpiredError(DxEncodingError):
+    """DX TTL 过期错误"""
+
+    def __init__(self, created_at: int, ttl_seconds: int, expired_at: int):
+        self.created_at = created_at
+        self.ttl_seconds = ttl_seconds
+        self.expired_at = expired_at
+        super().__init__(
+            f"TTL 已过期：创建于 {created_at}，有效期 {ttl_seconds} 秒，已于 {expired_at} 过期"
+        )
+
+
+@dataclass
+class TtlInfo:
+    """TTL 信息"""
+
+    created_at: int
+    """创建时间（Unix 时间戳，秒）"""
+
+    ttl_seconds: int
+    """有效期（秒），0 表示永不过期"""
+
+    expires_at: Optional[int]
+    """过期时间（Unix 时间戳，秒），None 表示永不过期"""
+
+    is_expired: bool
+    """是否已过期"""
 
 
 def crc16(data: bytes) -> int:
@@ -302,13 +341,16 @@ def dx_encode(
     return PREFIX + _encode_raw(combined)
 
 
-def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
+def dx_decode(
+    encoded: str, as_string: bool = True, check_ttl: bool = True
+) -> Union[str, bytes]:
     """
     将 DX 编码的字符串解码（带校验和验证，自动解压缩）
 
     参数:
         encoded: DX 编码的字符串（必须以 'dx' 开头）
         as_string: 是否返回字符串（默认 True）
+        check_ttl: 是否检查 TTL 过期（默认 True）
 
     返回:
         解码后的字符串或字节
@@ -316,6 +358,7 @@ def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
     异常:
         DxEncodingError: 如果输入不是有效的 DX 编码
         DxChecksumError: 如果校验和不匹配
+        DxTtlExpiredError: 如果 TTL 已过期
 
     示例:
         >>> dx_decode('dxXXXX...')
@@ -342,11 +385,46 @@ def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
     expected_checksum = (combined[1] << 8) | combined[2]
 
     # 验证 flags
-    if flags > 0x03:
+    if (flags & ~VALID_FLAGS_MASK) != 0:
         raise DxEncodingError(f"无效的 flags 字节：0x{flags:02X}")
 
+    # 确定 payload 的起始位置
+    payload_start = HEADER_SIZE
+
+    # 检查是否有 TTL
+    if flags & FLAG_HAS_TTL:
+        # 验证有 TTL 头部的最小长度
+        if len(combined) < HEADER_SIZE + TTL_HEADER_SIZE:
+            raise DxEncodingError("无效的格式头部")
+
+        # 如果需要检查 TTL
+        if check_ttl:
+            created_at = (
+                (combined[HEADER_SIZE] << 24)
+                | (combined[HEADER_SIZE + 1] << 16)
+                | (combined[HEADER_SIZE + 2] << 8)
+                | combined[HEADER_SIZE + 3]
+            )
+
+            ttl_seconds = (
+                (combined[HEADER_SIZE + 4] << 24)
+                | (combined[HEADER_SIZE + 5] << 16)
+                | (combined[HEADER_SIZE + 6] << 8)
+                | combined[HEADER_SIZE + 7]
+            )
+
+            # 检查是否过期
+            if ttl_seconds > 0:
+                expires_at = created_at + ttl_seconds
+                now = int(time.time())
+
+                if now > expires_at:
+                    raise DxTtlExpiredError(created_at, ttl_seconds, expires_at)
+
+        payload_start = HEADER_SIZE + TTL_HEADER_SIZE
+
     # 提取数据部分
-    payload = combined[HEADER_SIZE:]
+    payload = combined[payload_start:]
 
     # 根据 flags 决定是否需要解压缩
     if flags & FLAG_COMPRESSED:
@@ -499,6 +577,178 @@ def get_checksum(encoded: str) -> Tuple[int, int]:
     return (stored, computed)
 
 
+def has_ttl(encoded: str) -> bool:
+    """
+    检查编码是否包含 TTL 信息
+
+    参数:
+        encoded: DX 编码的字符串
+
+    返回:
+        是否包含 TTL
+
+    异常:
+        DxEncodingError: 如果输入不是有效的 DX 编码
+    """
+    if not encoded or not encoded.startswith(PREFIX):
+        raise DxEncodingError("无效的 DX 编码：缺少 dx 前缀")
+
+    data = encoded[len(PREFIX) :]
+    combined = _decode_raw(data)
+
+    if len(combined) < HEADER_SIZE:
+        raise DxEncodingError("无效的格式头部")
+
+    flags = combined[0]
+    return (flags & FLAG_HAS_TTL) != 0
+
+
+def get_ttl_info(encoded: str) -> Optional[TtlInfo]:
+    """
+    获取编码的 TTL 信息
+
+    参数:
+        encoded: DX 编码的字符串
+
+    返回:
+        TtlInfo 对象，如果没有 TTL 返回 None
+
+    异常:
+        DxEncodingError: 如果输入不是有效的 DX 编码
+    """
+    if not encoded or not encoded.startswith(PREFIX):
+        raise DxEncodingError("无效的 DX 编码：缺少 dx 前缀")
+
+    data = encoded[len(PREFIX) :]
+    combined = _decode_raw(data)
+
+    if len(combined) < HEADER_SIZE:
+        raise DxEncodingError("无效的格式头部")
+
+    flags = combined[0]
+
+    if (flags & FLAG_HAS_TTL) == 0:
+        return None
+
+    if len(combined) < HEADER_SIZE + TTL_HEADER_SIZE:
+        raise DxEncodingError("无效的格式头部")
+
+    created_at = (
+        (combined[HEADER_SIZE] << 24)
+        | (combined[HEADER_SIZE + 1] << 16)
+        | (combined[HEADER_SIZE + 2] << 8)
+        | combined[HEADER_SIZE + 3]
+    )
+
+    ttl_seconds = (
+        (combined[HEADER_SIZE + 4] << 24)
+        | (combined[HEADER_SIZE + 5] << 16)
+        | (combined[HEADER_SIZE + 6] << 8)
+        | combined[HEADER_SIZE + 7]
+    )
+
+    now = int(time.time())
+
+    if ttl_seconds == 0:
+        expires_at = None
+        is_expired = False
+    else:
+        expires_at = created_at + ttl_seconds
+        is_expired = now > expires_at
+
+    return TtlInfo(
+        created_at=created_at,
+        ttl_seconds=ttl_seconds,
+        expires_at=expires_at,
+        is_expired=is_expired,
+    )
+
+
+def is_expired(encoded: str) -> bool:
+    """
+    检查编码是否已过期
+
+    参数:
+        encoded: DX 编码的字符串
+
+    返回:
+        是否已过期（没有 TTL 的数据返回 False）
+
+    异常:
+        DxEncodingError: 如果输入不是有效的 DX 编码
+    """
+    info = get_ttl_info(encoded)
+    if info is None:
+        return False
+    return info.is_expired
+
+
+def dx_encode_with_ttl(
+    data: Union[str, bytes], ttl_seconds: int, allow_compression: bool = True
+) -> str:
+    """
+    使用 TTL 编码数据
+
+    参数:
+        data: 要编码的数据（字符串或字节）
+        ttl_seconds: 有效期（秒），0 表示永不过期
+        allow_compression: 是否允许压缩（默认 True）
+
+    返回:
+        带有 TTL 的 DX 编码字符串
+
+    示例:
+        >>> dx_encode_with_ttl('Hello', 3600)  # 1小时有效期
+        'dxXXXX...'
+    """
+    # 将输入转换为字节
+    if isinstance(data, str):
+        data_bytes = data.encode("utf-8")
+    else:
+        data_bytes = bytes(data)
+
+    # 获取当前时间戳
+    created_at = int(time.time())
+
+    # 计算原始数据的 CRC16
+    checksum = crc16(data_bytes)
+
+    # 决定是否压缩
+    flags = FLAG_HAS_TTL
+    payload = data_bytes
+
+    if allow_compression and len(data_bytes) >= COMPRESSION_THRESHOLD:
+        try:
+            compressed = _compress_deflate(data_bytes)
+            if len(compressed) + 2 < len(data_bytes) and len(data_bytes) <= 65535:
+                flags |= FLAG_COMPRESSED | FLAG_ALGO_DEFLATE
+                payload = (
+                    bytes([(len(data_bytes) >> 8) & 0xFF, len(data_bytes) & 0xFF])
+                    + compressed
+                )
+        except Exception:
+            pass
+
+    # 构建完整数据
+    combined = bytearray(HEADER_SIZE + TTL_HEADER_SIZE + len(payload))
+    combined[0] = flags
+    combined[1] = (checksum >> 8) & 0xFF
+    combined[2] = checksum & 0xFF
+    # created_at (大端序)
+    combined[3] = (created_at >> 24) & 0xFF
+    combined[4] = (created_at >> 16) & 0xFF
+    combined[5] = (created_at >> 8) & 0xFF
+    combined[6] = created_at & 0xFF
+    # ttl_seconds (大端序)
+    combined[7] = (ttl_seconds >> 24) & 0xFF
+    combined[8] = (ttl_seconds >> 16) & 0xFF
+    combined[9] = (ttl_seconds >> 8) & 0xFF
+    combined[10] = ttl_seconds & 0xFF
+    combined[HEADER_SIZE + TTL_HEADER_SIZE :] = payload
+
+    return PREFIX + _encode_raw(bytes(combined))
+
+
 def is_compressed(encoded: str) -> bool:
     """
     检查编码是否使用了压缩
@@ -544,7 +794,7 @@ def get_dx_info() -> dict:
     """
     return {
         "name": "DX Encoding",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "author": "Dogxi",
         "charset": DX_CHARSET,
         "prefix": PREFIX,
