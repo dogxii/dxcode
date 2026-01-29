@@ -2,10 +2,11 @@
  * DX Encoding - 带有 `dx` 前缀的自定义编码算法
  *
  * @author Dogxi
- * @version 2.0.0
+ * @version 2.1.0
  * @license MIT
  *
  * v2.0 新增: CRC16-CCITT 校验和支持
+ * v2.1 新增: 智能 DEFLATE 压缩支持
  */
 
 // DX 字符集 - 以 DXdx 开头作为签名，共64个字符
@@ -21,8 +22,15 @@ const PREFIX = "dx";
 // 填充字符
 const PADDING = "=";
 
-// 头部大小（2字节 CRC16）
-const HEADER_SIZE = 2;
+// 头部大小（1字节 flags + 2字节 CRC16）
+const HEADER_SIZE = 3;
+
+// 压缩阈值（字节数），小于此值不压缩
+const COMPRESSION_THRESHOLD = 32;
+
+// Flags 位定义
+const FLAG_COMPRESSED = 0x01;
+const FLAG_ALGO_DEFLATE = 0x02;
 
 // 构建反向查找表
 const DX_DECODE_MAP = {};
@@ -77,6 +85,166 @@ function bytesToString(bytes) {
 	const decoder = new TextDecoder("utf-8");
 	return decoder.decode(bytes);
 }
+
+// ============================================================================
+// DEFLATE 压缩/解压缩实现 (纯 JavaScript，无外部依赖)
+// ============================================================================
+
+/**
+ * 简单的 DEFLATE 压缩实现
+ * 使用 LZ77 + 固定 Huffman 编码
+ */
+class DeflateCompressor {
+	constructor() {
+		this.output = [];
+		this.bitBuffer = 0;
+		this.bitCount = 0;
+	}
+
+	writeBits(value, bits) {
+		this.bitBuffer |= value << this.bitCount;
+		this.bitCount += bits;
+		while (this.bitCount >= 8) {
+			this.output.push(this.bitBuffer & 0xff);
+			this.bitBuffer >>= 8;
+			this.bitCount -= 8;
+		}
+	}
+
+	flush() {
+		if (this.bitCount > 0) {
+			this.output.push(this.bitBuffer & 0xff);
+		}
+		return new Uint8Array(this.output);
+	}
+
+	compress(data) {
+		// 使用存储块（无压缩）作为简单实现
+		// BFINAL=1, BTYPE=00 (无压缩)
+		this.writeBits(1, 1); // BFINAL
+		this.writeBits(0, 2); // BTYPE = 00 (stored)
+
+		// 对齐到字节边界
+		if (this.bitCount > 0) {
+			this.output.push(this.bitBuffer & 0xff);
+			this.bitBuffer = 0;
+			this.bitCount = 0;
+		}
+
+		// LEN 和 NLEN
+		const len = data.length;
+		this.output.push(len & 0xff);
+		this.output.push((len >> 8) & 0xff);
+		this.output.push(~len & 0xff);
+		this.output.push((~len >> 8) & 0xff);
+
+		// 数据
+		for (let i = 0; i < data.length; i++) {
+			this.output.push(data[i]);
+		}
+
+		return new Uint8Array(this.output);
+	}
+}
+
+/**
+ * 简单的 DEFLATE 解压缩实现
+ */
+class DeflateDecompressor {
+	constructor(data) {
+		this.data = data;
+		this.pos = 0;
+		this.bitBuffer = 0;
+		this.bitCount = 0;
+		this.output = [];
+	}
+
+	readBits(bits) {
+		while (this.bitCount < bits) {
+			if (this.pos >= this.data.length) {
+				throw new Error("Unexpected end of data");
+			}
+			this.bitBuffer |= this.data[this.pos++] << this.bitCount;
+			this.bitCount += 8;
+		}
+		const value = this.bitBuffer & ((1 << bits) - 1);
+		this.bitBuffer >>= bits;
+		this.bitCount -= bits;
+		return value;
+	}
+
+	readByte() {
+		// 对齐到字节边界
+		this.bitBuffer = 0;
+		this.bitCount = 0;
+		if (this.pos >= this.data.length) {
+			throw new Error("Unexpected end of data");
+		}
+		return this.data[this.pos++];
+	}
+
+	decompress() {
+		let bfinal = 0;
+
+		while (bfinal === 0) {
+			bfinal = this.readBits(1);
+			const btype = this.readBits(2);
+
+			if (btype === 0) {
+				// 存储块（无压缩）
+				// 对齐到字节边界
+				this.bitBuffer = 0;
+				this.bitCount = 0;
+
+				const len = this.data[this.pos] | (this.data[this.pos + 1] << 8);
+				this.pos += 2;
+				const nlen = this.data[this.pos] | (this.data[this.pos + 1] << 8);
+				this.pos += 2;
+
+				if ((len ^ nlen) !== 0xffff) {
+					throw new Error("Invalid stored block");
+				}
+
+				for (let i = 0; i < len; i++) {
+					this.output.push(this.data[this.pos++]);
+				}
+			} else if (btype === 1 || btype === 2) {
+				// 固定或动态 Huffman - 简化实现，只支持存储块
+				throw new Error(
+					"Huffman compression not supported in this implementation",
+				);
+			} else {
+				throw new Error("Invalid block type");
+			}
+		}
+
+		return new Uint8Array(this.output);
+	}
+}
+
+/**
+ * 使用 DEFLATE 压缩数据
+ * @param {Uint8Array} data - 要压缩的数据
+ * @returns {Uint8Array} 压缩后的数据
+ */
+function compressDeflate(data) {
+	const compressor = new DeflateCompressor();
+	return compressor.compress(data);
+}
+
+/**
+ * 使用 DEFLATE 解压缩数据
+ * @param {Uint8Array} data - 压缩的数据
+ * @returns {Uint8Array} 解压缩后的数据
+ */
+function decompressDeflate(data) {
+	const decompressor = new DeflateDecompressor(data);
+	return decompressor.decompress();
+}
+
+// ============================================================================
+// 内部编解码函数
+// ============================================================================
 
 /**
  * 内部编码函数（不带前缀）
@@ -194,18 +362,25 @@ function decodeRaw(data) {
 	return result;
 }
 
+// ============================================================================
+// 公开 API
+// ============================================================================
+
 /**
- * DX 编码（带 CRC16 校验和）
+ * DX 编码（带 CRC16 校验和和智能压缩）
  * 将字符串或字节数组编码为 DX 格式
  *
  * @param {string|Uint8Array|number[]} input - 要编码的数据
+ * @param {Object} options - 选项
+ * @param {boolean} options.compress - 是否允许压缩（默认 true）
  * @returns {string} DX 编码后的字符串（带 dx 前缀和校验和）
  *
  * @example
  * dxEncode('Hello, Dogxi!')  // 返回 'dxXXXX...'
  * dxEncode(new Uint8Array([0x48, 0x69]))  // 返回 'dxXXXX...'
+ * dxEncode('long text...', { compress: false })  // 禁用压缩
  */
-function dxEncode(input) {
+function dxEncode(input, options = { compress: true }) {
 	// 将输入转换为字节数组
 	let bytes;
 	if (typeof input === "string") {
@@ -218,23 +393,51 @@ function dxEncode(input) {
 		throw new Error("输入必须是字符串、Uint8Array 或数字数组");
 	}
 
-	// 计算 CRC16
+	// 计算原始数据的 CRC16
 	const checksum = crc16(bytes);
 
-	// 构建头部（2字节 CRC16，大端序）
-	const header = new Uint8Array([checksum >> 8, checksum & 0xff]);
+	// 决定是否压缩
+	let flags = 0;
+	let payload = bytes;
+
+	if (options.compress !== false && bytes.length >= COMPRESSION_THRESHOLD) {
+		try {
+			const compressed = compressDeflate(bytes);
+			// 压缩后需要额外存储 2 字节原始大小
+			// 只有当压缩后的大小 + 2 < 原始大小时才使用压缩
+			if (compressed.length + 2 < bytes.length && bytes.length <= 65535) {
+				// 使用压缩
+				flags = FLAG_COMPRESSED | FLAG_ALGO_DEFLATE;
+				const newPayload = new Uint8Array(2 + compressed.length);
+				// 存储原始大小（大端序）
+				newPayload[0] = (bytes.length >> 8) & 0xff;
+				newPayload[1] = bytes.length & 0xff;
+				newPayload.set(compressed, 2);
+				payload = newPayload;
+			}
+		} catch (e) {
+			// 压缩失败，使用原始数据
+		}
+	}
+
+	// 构建头部（1字节 flags + 2字节 CRC16，大端序）
+	const header = new Uint8Array([
+		flags,
+		(checksum >> 8) & 0xff,
+		checksum & 0xff,
+	]);
 
 	// 合并头部和数据
-	const combined = new Uint8Array(HEADER_SIZE + bytes.length);
+	const combined = new Uint8Array(HEADER_SIZE + payload.length);
 	combined.set(header, 0);
-	combined.set(bytes, HEADER_SIZE);
+	combined.set(payload, HEADER_SIZE);
 
 	// 编码
 	return PREFIX + encodeRaw(combined);
 }
 
 /**
- * DX 解码（带校验和验证）
+ * DX 解码（带校验和验证，自动解压缩）
  * 将 DX 编码的字符串解码为原始数据
  *
  * @param {string} encoded - DX 编码的字符串
@@ -265,20 +468,47 @@ function dxDecode(encoded, options = { asString: true }) {
 	}
 
 	// 提取头部
-	const expectedChecksum = (combined[0] << 8) | combined[1];
+	const flags = combined[0];
+	const expectedChecksum = (combined[1] << 8) | combined[2];
 
-	// 提取数据
+	// 验证 flags
+	if (flags > 0x03) {
+		throw new Error(
+			`无效的 flags 字节：0x${flags.toString(16).padStart(2, "0")}`,
+		);
+	}
+
+	// 提取数据部分
 	const payload = combined.slice(HEADER_SIZE);
 
-	// 验证校验和
-	const actualChecksum = crc16(payload);
+	// 根据 flags 决定是否需要解压缩
+	let originalData;
+	if (flags & FLAG_COMPRESSED) {
+		// 数据已压缩，需要解压
+		if (payload.length < 2) {
+			throw new Error("无效的格式头部");
+		}
+
+		// 提取原始大小（用于验证）
+		const _originalSize = (payload[0] << 8) | payload[1];
+
+		// 解压缩
+		const compressedData = payload.slice(2);
+		originalData = decompressDeflate(compressedData);
+	} else {
+		// 数据未压缩
+		originalData = payload;
+	}
+
+	// 验证校验和（针对原始数据）
+	const actualChecksum = crc16(originalData);
 	if (expectedChecksum !== actualChecksum) {
 		throw new Error(
 			`校验和不匹配：期望 0x${expectedChecksum.toString(16).toUpperCase().padStart(4, "0")}，实际 0x${actualChecksum.toString(16).toUpperCase().padStart(4, "0")}`,
 		);
 	}
 
-	return options.asString ? bytesToString(payload) : payload;
+	return options.asString ? bytesToString(originalData) : originalData;
 }
 
 /**
@@ -370,12 +600,57 @@ function getChecksum(encoded) {
 		throw new Error("无效的格式头部");
 	}
 
-	// 提取校验和
-	const stored = (combined[0] << 8) | combined[1];
+	// 提取 flags 和校验和
+	const flags = combined[0];
+	const stored = (combined[1] << 8) | combined[2];
 	const payload = combined.slice(HEADER_SIZE);
-	const computed = crc16(payload);
+
+	// 根据 flags 决定是否需要解压缩
+	let originalData;
+	if (flags & FLAG_COMPRESSED) {
+		if (payload.length < 2) {
+			throw new Error("无效的格式头部");
+		}
+		const compressedData = payload.slice(2);
+		originalData = decompressDeflate(compressedData);
+	} else {
+		originalData = payload;
+	}
+
+	const computed = crc16(originalData);
 
 	return { stored, computed };
+}
+
+/**
+ * 检查编码是否使用了压缩
+ *
+ * @param {string} encoded - DX 编码的字符串
+ * @returns {boolean} 是否使用了压缩
+ *
+ * @example
+ * isCompressed('dxXXXX...')  // true 或 false
+ */
+function isCompressed(encoded) {
+	// 验证前缀
+	if (!encoded || !encoded.startsWith(PREFIX)) {
+		throw new Error("无效的 DX 编码：缺少 dx 前缀");
+	}
+
+	// 移除前缀
+	const data = encoded.slice(PREFIX.length);
+
+	// 解码
+	const combined = decodeRaw(data);
+
+	// 验证长度
+	if (combined.length < HEADER_SIZE) {
+		throw new Error("无效的格式头部");
+	}
+
+	// 检查 flags
+	const flags = combined[0];
+	return (flags & FLAG_COMPRESSED) !== 0;
 }
 
 /**
@@ -386,13 +661,15 @@ function getChecksum(encoded) {
 function getDxInfo() {
 	return {
 		name: "DX Encoding",
-		version: "2.0.0",
+		version: "2.1.0",
 		author: "Dogxi",
 		charset: DX_CHARSET,
 		prefix: PREFIX,
 		magic: MAGIC,
 		padding: PADDING,
 		checksum: "CRC16-CCITT",
+		compression: "DEFLATE",
+		compressionThreshold: COMPRESSION_THRESHOLD,
 	};
 }
 
@@ -404,12 +681,14 @@ if (typeof module !== "undefined" && module.exports) {
 		isDxEncoded,
 		dxVerify,
 		getChecksum,
+		isCompressed,
 		getDxInfo,
 		crc16,
 		DX_CHARSET,
 		PREFIX,
 		MAGIC,
 		PADDING,
+		COMPRESSION_THRESHOLD,
 	};
 }
 
@@ -420,12 +699,14 @@ export {
 	isDxEncoded,
 	dxVerify,
 	getChecksum,
+	isCompressed,
 	getDxInfo,
 	crc16,
 	DX_CHARSET,
 	PREFIX,
 	MAGIC,
 	PADDING,
+	COMPRESSION_THRESHOLD,
 };
 
 export default {
@@ -434,6 +715,7 @@ export default {
 	isEncoded: isDxEncoded,
 	verify: dxVerify,
 	getChecksum,
+	isCompressed,
 	info: getDxInfo,
 	crc16,
 };

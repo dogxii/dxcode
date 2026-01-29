@@ -5,22 +5,25 @@
 <p>
   <img src="https://img.shields.io/badge/Algorithm-DX-black?style=for-the-badge" alt="DX Algorithm">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/badge/Version-2.0.0-white?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.1.0-white?style=for-the-badge" alt="Version">
 </p>
 
 ## 🌟 简介
 
 **DX 编码** 是一种自定义的二进制到文本编码方案。它将二进制数据转换为独特的 ASCII 字符串表示，并带有强制性的 `dx` 前缀。与标准 Base64 不同，DX 使用专门设计的字符集和变换逻辑，生成易于识别且 URL 安全的编码字符串。
 
-## 🆕 v2.0 新特性
+## 🆕 v2.1 新特性
 
+- **智能 DEFLATE 压缩**：自动检测并压缩大数据，显著减少编码长度
 - **CRC16-CCITT 校验和**：自动嵌入校验和，支持数据完整性验证
 - **篡改检测**：解码时自动验证，检测数据损坏或篡改
 - **新增 `verify` 命令**：快速验证编码数据的完整性
+- **新增 `--no-compress` 选项**：可选禁用压缩
 
 ## 🎯 特性
 
 - **可识别前缀**：所有编码字符串均以 `dx` 开头，便于识别数据类型。
+- **智能压缩**：自动使用 DEFLATE 压缩大于 32 字节的数据，节省空间。
 - **数据完整性**：内置 CRC16-CCITT 校验和，确保数据传输可靠。
 - **自定义字符集**：优化的 64 字符表，兼顾 URL 安全性与独特性。
 - **双向转换**：支持任意二进制数据的无损编码与解码。
@@ -45,12 +48,13 @@ curl -fsSL https://cdn.dogxi.me/dxcode_install.sh | sh
 使用示例：
 
 ```bash
-dxc encode "Hello World"    # 编码
-dxc decode "dxQBpX..."      # 解码
-dxc verify "dxQBpX..."      # 验证校验和
-dxc check "dxQBpX..."       # 检查有效性
-dxc info                    # 显示算法信息
-dxc --help                  # 查看帮助
+dxc encode "Hello World"           # 编码（自动压缩）
+dxc encode --no-compress "Hello"   # 编码（禁用压缩）
+dxc decode "dxQBpX..."             # 解码（自动解压缩）
+dxc verify "dxQBpX..."             # 验证校验和
+dxc check "dxQBpX..."              # 检查有效性
+dxc info                           # 显示算法信息
+dxc --help                         # 查看帮助
 ```
 
 ### JavaScript / TypeScript
@@ -75,7 +79,7 @@ go get github.com/dogxii/dxcode
 
 ```toml
 [dependencies]
-dxcode = "2.0"
+dxcode = "2.1"
 ```
 
 ## 🔧 算法规范
@@ -96,15 +100,17 @@ DXdx0123456789ABCEFGHIJKLMNOPQRSTUVWYZabcefghijklmnopqrstuvwyz-_
 - **小写字母**：`a-z` (排除 `d`, `x`，24 字符)
 - **安全符号**：`-` 和 `_` (2 字符)
 
-### 编码格式 (v2.0)
+### 编码格式 (v2.1)
 
 ```
-DX编码字符串 = "dx" + 编码(CRC16头部 + 原始数据) + 填充
+DX编码字符串 = "dx" + 编码(flags + CRC16 + [orig_size] + 数据) + 填充
 
 其中：
   - "dx"       : 固定 2 字符前缀
-  - CRC16头部  : 2 字节校验和（大端序）
-  - 原始数据   : 用户输入的数据
+  - flags      : 1 字节标志位（bit0=压缩, bit1-2=压缩算法）
+  - CRC16      : 2 字节校验和（大端序，针对原始数据）
+  - orig_size  : 2 字节原始大小（仅压缩时存在）
+  - 数据       : 原始数据或压缩后的数据
   - 填充       : 0、1 或 2 个 '=' 字符
 ```
 
@@ -112,13 +118,14 @@ DX编码字符串 = "dx" + 编码(CRC16头部 + 原始数据) + 填充
 
 1. **输入**：原始字节数据（字符串转换为 UTF-8 字节）。
 2. **计算校验和**：对原始数据计算 CRC16-CCITT 校验和。
-3. **构建头部**：将 2 字节校验和（大端序）放在数据前。
-4. **分组**：每 3 字节（24位）为一组。
-5. **分割**：将 24 位数据分割为 4 个 6 位值。
-6. **变换**：对每个 6 位值与魔数 `0x44` 进行 XOR 运算，增加混淆性。
-7. **映射**：将变换后的值映射到 DX 字符集。
-8. **填充**：若输入长度不能被 3 整除，使用 `=` 进行填充。
-9. **前缀**：最终结果添加 `dx` 前缀。
+3. **智能压缩**：如果数据 >= 32 字节，尝试 DEFLATE 压缩，若压缩有效则使用。
+4. **构建头部**：flags(1) + CRC16(2) + [orig_size(2, 仅压缩时)]。
+5. **分组**：每 3 字节（24位）为一组。
+6. **分割**：将 24 位数据分割为 4 个 6 位值。
+7. **变换**：对每个 6 位值与魔数 `0x44` 进行 XOR 运算，增加混淆性。
+8. **映射**：将变换后的值映射到 DX 字符集。
+9. **填充**：若输入长度不能被 3 整除，使用 `=` 进行填充。
+10. **前缀**：最终结果添加 `dx` 前缀。
 
 ## 🚀 快速开始
 
@@ -210,15 +217,16 @@ cat file.txt | dxc encode > encoded.txt
 
 ## 📊 与 Base64 对比
 
-| 特性         | DX 编码 v2.0      | Base64       |
-| :----------- | :---------------- | :----------- |
-| **字符集**   | 自定义 64 字符    | 标准 64 字符 |
-| **前缀标识** | `dx`              | 无           |
-| **混淆处理** | 是 (XOR 0x44)     | 否           |
-| **校验和**   | CRC16-CCITT       | 无           |
-| **大小开销** | ~1.37x + 4-5 字节 | ~1.33x       |
-| **识别性**   | 高 (dx 前缀)      | 低           |
-| **完整性**   | 内置验证          | 无           |
+| 特性         | DX 编码 v2.1             | Base64       |
+| :----------- | :----------------------- | :----------- |
+| **字符集**   | 自定义 64 字符           | 标准 64 字符 |
+| **前缀标识** | `dx`                     | 无           |
+| **混淆处理** | 是 (XOR 0x44)            | 否           |
+| **校验和**   | CRC16-CCITT              | 无           |
+| **压缩**     | 智能 DEFLATE             | 无           |
+| **大小开销** | ~1.37x + 5 字节 (可压缩) | ~1.33x       |
+| **识别性**   | 高 (dx 前缀)             | 低           |
+| **完整性**   | 内置验证                 | 无           |
 
 ## 🔐 安全提示
 

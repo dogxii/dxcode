@@ -1,7 +1,7 @@
 /**
  * dxcode 测试文件
  * 由 Dogxi 创建
- * v2.0 - 带 CRC16 校验和支持
+ * v2.1 - 带 CRC16 校验和和智能压缩支持
  */
 
 const {
@@ -10,8 +10,10 @@ const {
 	isDxEncoded,
 	dxVerify,
 	getChecksum,
+	isCompressed,
 	getDxInfo,
 	crc16,
+	COMPRESSION_THRESHOLD,
 } = require("./dxcode");
 
 // 测试用例
@@ -43,7 +45,7 @@ let passed = 0;
 let failed = 0;
 
 console.log("╔════════════════════════════════════════════════════════════╗");
-console.log("║              DX Encoding 测试套件 v2.0                     ║");
+console.log("║              DX Encoding 测试套件 v2.1                     ║");
 console.log("║              由 Dogxi 创建                                 ║");
 console.log("╚════════════════════════════════════════════════════════════╝");
 console.log();
@@ -57,6 +59,8 @@ console.log(`   作者: ${info.author}`);
 console.log(`   前缀: ${info.prefix}`);
 console.log(`   魔数: 0x${info.magic.toString(16).toUpperCase()}`);
 console.log(`   校验和: ${info.checksum}`);
+console.log(`   压缩算法: ${info.compression}`);
+console.log(`   压缩阈值: ${info.compressionThreshold} 字节`);
 console.log();
 
 console.log("🧪 运行测试用例...");
@@ -105,6 +109,97 @@ for (const testCase of testCases) {
 		console.log(`   错误: ${error.message}`);
 		failed++;
 	}
+}
+
+console.log("─".repeat(60));
+console.log();
+
+// 压缩测试
+console.log("📦 压缩测试...");
+console.log("─".repeat(60));
+
+try {
+	// 短数据不应该被压缩
+	const shortData = "Hello";
+	const encodedShort = dxEncode(shortData);
+	if (isCompressed(encodedShort)) {
+		throw new Error("短数据不应该被压缩");
+	}
+	console.log("✅ 短数据不压缩测试");
+	console.log(`   原始: "${shortData}" (${shortData.length} 字节)`);
+	console.log(`   压缩: 否`);
+	passed++;
+} catch (error) {
+	console.log(`❌ 短数据不压缩测试`);
+	console.log(`   错误: ${error.message}`);
+	failed++;
+}
+
+try {
+	// 长重复数据应该被压缩
+	const longData = "A".repeat(100);
+	const encodedLong = dxEncode(longData);
+	const compressed = isCompressed(encodedLong);
+
+	// 验证解码正确
+	const decoded = dxDecode(encodedLong);
+	if (decoded !== longData) {
+		throw new Error("解码不匹配");
+	}
+
+	console.log("✅ 长重复数据压缩测试");
+	console.log(`   原始: ${longData.length} 字节`);
+	console.log(`   压缩: ${compressed ? "是" : "否"}`);
+	console.log(`   编码长度: ${encodedLong.length} 字符`);
+	passed++;
+} catch (error) {
+	console.log(`❌ 长重复数据压缩测试`);
+	console.log(`   错误: ${error.message}`);
+	failed++;
+}
+
+try {
+	// 禁用压缩选项测试
+	const data = "Hello World ".repeat(20);
+	const encodedCompressed = dxEncode(data);
+	const encodedUncompressed = dxEncode(data, { compress: false });
+
+	// 未压缩版本不应该有压缩标志
+	if (isCompressed(encodedUncompressed)) {
+		throw new Error("禁用压缩后仍然被压缩");
+	}
+
+	// 两种方式都能正确解码
+	const decoded1 = dxDecode(encodedCompressed);
+	const decoded2 = dxDecode(encodedUncompressed);
+	if (decoded1 !== data || decoded2 !== data) {
+		throw new Error("解码不匹配");
+	}
+
+	console.log("✅ 禁用压缩选项测试");
+	console.log(`   压缩版本: ${encodedCompressed.length} 字符`);
+	console.log(`   未压缩版本: ${encodedUncompressed.length} 字符`);
+	passed++;
+} catch (error) {
+	console.log(`❌ 禁用压缩选项测试`);
+	console.log(`   错误: ${error.message}`);
+	failed++;
+}
+
+try {
+	// 压缩阈值测试
+	const belowThreshold = "x".repeat(COMPRESSION_THRESHOLD - 1);
+	const encodedBelow = dxEncode(belowThreshold);
+	if (isCompressed(encodedBelow)) {
+		throw new Error("低于阈值的数据不应该被压缩");
+	}
+	console.log("✅ 压缩阈值测试");
+	console.log(`   阈值: ${COMPRESSION_THRESHOLD} 字节`);
+	passed++;
+} catch (error) {
+	console.log(`❌ 压缩阈值测试`);
+	console.log(`   错误: ${error.message}`);
+	failed++;
 }
 
 console.log("─".repeat(60));

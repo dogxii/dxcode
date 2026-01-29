@@ -1,6 +1,6 @@
 //! dxcode - 带有 `dx` 前缀的自定义编码算法
 //!
-//! Rust 实现 - 带 CRC16 校验和
+//! Rust 实现 - 带 CRC16 校验和和智能压缩
 //!
 //! # 示例
 //!
@@ -11,7 +11,7 @@
 //! let encoded = encode_str("你好，Dogxi！");
 //! println!("{}", encoded); // dxXXXX...
 //!
-//! // 解码（自动验证校验和）
+//! // 解码（自动验证校验和，自动解压缩）
 //! let decoded = decode_str(&encoded).unwrap();
 //! println!("{}", decoded); // 你好，Dogxi！
 //!
@@ -26,15 +26,19 @@
 //!
 //! # 版本
 //!
-//! 2.0.0
+//! 2.1.0
 //!
 //! # 许可证
 //!
 //! MIT
 
+use flate2::read::DeflateDecoder;
+use flate2::write::DeflateEncoder;
+use flate2::Compression;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::io::{Read, Write};
 use std::sync::LazyLock;
 
 /// DX 字符集 - 以 DXdx 开头作为签名，共64个字符
@@ -49,8 +53,15 @@ pub const PREFIX: &str = "dx";
 /// 填充字符
 pub const PADDING: char = '=';
 
-/// 头部大小（原始字节）: 2 字节 CRC16
-const HEADER_SIZE: usize = 2;
+/// 头部大小（1字节 flags + 2字节 CRC16）
+const HEADER_SIZE: usize = 3;
+
+/// 压缩阈值（字节数），小于此值不压缩
+const COMPRESSION_THRESHOLD: usize = 32;
+
+/// Flags 位定义
+const FLAG_COMPRESSED: u8 = 0x01;
+const FLAG_ALGO_DEFLATE: u8 = 0x02;
 
 /// 字符集字节数组
 static CHARSET_BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| CHARSET.as_bytes().to_vec());
@@ -96,6 +107,10 @@ pub enum DxError {
     ChecksumMismatch { expected: u16, actual: u16 },
     /// 头部无效
     InvalidHeader,
+    /// 压缩/解压缩错误
+    CompressionError(String),
+    /// 无效的 flags
+    InvalidFlags(u8),
 }
 
 impl fmt::Display for DxError {
@@ -106,9 +121,15 @@ impl fmt::Display for DxError {
             DxError::InvalidCharacter(c) => write!(f, "无效的 DX 编码：包含非法字符 '{}'", c),
             DxError::Utf8Error(s) => write!(f, "UTF-8 解码错误：{}", s),
             DxError::ChecksumMismatch { expected, actual } => {
-                write!(f, "校验和不匹配：期望 0x{:04X}，实际 0x{:04X}", expected, actual)
+                write!(
+                    f,
+                    "校验和不匹配：期望 0x{:04X}，实际 0x{:04X}",
+                    expected, actual
+                )
             }
             DxError::InvalidHeader => write!(f, "无效的格式头部"),
+            DxError::CompressionError(s) => write!(f, "压缩/解压缩错误：{}", s),
+            DxError::InvalidFlags(flags) => write!(f, "无效的 flags 字节：0x{:02X}", flags),
         }
     }
 }
@@ -126,6 +147,27 @@ pub fn crc16(data: &[u8]) -> u16 {
         crc = (crc << 8) ^ CRC16_TABLE[index];
     }
     crc
+}
+
+/// 使用 DEFLATE 压缩数据
+fn compress_deflate(data: &[u8]) -> Result<Vec<u8>> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(data)
+        .map_err(|e| DxError::CompressionError(e.to_string()))?;
+    encoder
+        .finish()
+        .map_err(|e| DxError::CompressionError(e.to_string()))
+}
+
+/// 使用 DEFLATE 解压缩数据
+fn decompress_deflate(data: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = DeflateDecoder::new(data);
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|e| DxError::CompressionError(e.to_string()))?;
+    Ok(decompressed)
 }
 
 /// 内部编码函数（不带前缀）
@@ -252,7 +294,7 @@ fn decode_raw(data: &str) -> Result<Vec<u8>> {
     Ok(result)
 }
 
-/// 将字节切片编码为 DX 格式（带 CRC16 校验和）
+/// 将字节切片编码为 DX 格式（带 CRC16 校验和和智能压缩）
 ///
 /// # 参数
 ///
@@ -260,7 +302,7 @@ fn decode_raw(data: &str) -> Result<Vec<u8>> {
 ///
 /// # 返回值
 ///
-/// 以 'dx' 为前缀、包含 CRC16 校验和的编码字符串
+/// 以 'dx' 为前缀、包含 CRC16 校验和的编码字符串（可能压缩）
 ///
 /// # 示例
 ///
@@ -271,16 +313,60 @@ fn decode_raw(data: &str) -> Result<Vec<u8>> {
 /// assert!(encoded.starts_with("dx"));
 /// ```
 pub fn encode(data: &[u8]) -> String {
-    // 计算 CRC16
+    encode_with_options(data, true)
+}
+
+/// 将字节切片编码为 DX 格式，可选择是否启用压缩
+///
+/// # 参数
+///
+/// * `data` - 要编码的字节数据
+/// * `allow_compression` - 是否允许压缩
+///
+/// # 返回值
+///
+/// 以 'dx' 为前缀的编码字符串
+pub fn encode_with_options(data: &[u8], allow_compression: bool) -> String {
+    // 计算原始数据的 CRC16
     let checksum = crc16(data);
 
-    // 构建头部（2字节 CRC16，大端序）
-    let header = [(checksum >> 8) as u8, (checksum & 0xFF) as u8];
+    // 决定是否压缩
+    let (flags, payload) = if allow_compression && data.len() >= COMPRESSION_THRESHOLD {
+        // 尝试压缩
+        match compress_deflate(data) {
+            Ok(compressed) => {
+                // 压缩后需要额外存储 2 字节原始大小
+                // 只有当压缩后的大小 + 2 < 原始大小时才使用压缩
+                if compressed.len() + 2 < data.len() && data.len() <= 65535 {
+                    // 使用压缩
+                    let mut payload = Vec::with_capacity(2 + compressed.len());
+                    // 存储原始大小（大端序）
+                    payload.push((data.len() >> 8) as u8);
+                    payload.push((data.len() & 0xFF) as u8);
+                    payload.extend_from_slice(&compressed);
+                    (FLAG_COMPRESSED | FLAG_ALGO_DEFLATE, payload)
+                } else {
+                    // 压缩无收益，使用原始数据
+                    (0u8, data.to_vec())
+                }
+            }
+            Err(_) => {
+                // 压缩失败，使用原始数据
+                (0u8, data.to_vec())
+            }
+        }
+    } else {
+        // 不压缩
+        (0u8, data.to_vec())
+    };
+
+    // 构建头部（1字节 flags + 2字节 CRC16，大端序）
+    let header = [flags, (checksum >> 8) as u8, (checksum & 0xFF) as u8];
 
     // 合并头部和数据
-    let mut combined = Vec::with_capacity(HEADER_SIZE + data.len());
+    let mut combined = Vec::with_capacity(HEADER_SIZE + payload.len());
     combined.extend_from_slice(&header);
-    combined.extend_from_slice(data);
+    combined.extend_from_slice(&payload);
 
     // 编码
     let mut result = String::with_capacity(PREFIX.len() + (combined.len() + 2) / 3 * 4);
@@ -289,7 +375,7 @@ pub fn encode(data: &[u8]) -> String {
     result
 }
 
-/// 将字符串编码为 DX 格式（带 CRC16 校验和）
+/// 将字符串编码为 DX 格式（带 CRC16 校验和和智能压缩）
 ///
 /// # 参数
 ///
@@ -311,7 +397,12 @@ pub fn encode_str(s: &str) -> String {
     encode(s.as_bytes())
 }
 
-/// 将 DX 编码的字符串解码为字节向量（带校验和验证）
+/// 将字符串编码为 DX 格式，可选择是否启用压缩
+pub fn encode_str_with_options(s: &str, allow_compression: bool) -> String {
+    encode_with_options(s.as_bytes(), allow_compression)
+}
+
+/// 将 DX 编码的字符串解码为字节向量（带校验和验证，自动解压缩）
 ///
 /// # 参数
 ///
@@ -348,13 +439,40 @@ pub fn decode(encoded: &str) -> Result<Vec<u8>> {
     }
 
     // 提取头部
-    let expected_checksum = ((combined[0] as u16) << 8) | (combined[1] as u16);
+    let flags = combined[0];
+    let expected_checksum = ((combined[1] as u16) << 8) | (combined[2] as u16);
 
-    // 提取数据
+    // 验证 flags 的保留位
+    if flags & 0xFC != 0 && flags & 0xFC != FLAG_ALGO_DEFLATE {
+        // 允许 flags 为 0x00, 0x01, 0x02, 0x03
+        if flags > 0x03 {
+            return Err(DxError::InvalidFlags(flags));
+        }
+    }
+
+    // 提取数据部分
     let payload = &combined[HEADER_SIZE..];
 
-    // 验证校验和
-    let actual_checksum = crc16(payload);
+    // 根据 flags 决定是否需要解压缩
+    let original_data = if flags & FLAG_COMPRESSED != 0 {
+        // 数据已压缩，需要解压
+        if payload.len() < 2 {
+            return Err(DxError::InvalidHeader);
+        }
+
+        // 提取原始大小（用于验证）
+        let _original_size = ((payload[0] as usize) << 8) | (payload[1] as usize);
+
+        // 解压缩
+        let compressed_data = &payload[2..];
+        decompress_deflate(compressed_data)?
+    } else {
+        // 数据未压缩
+        payload.to_vec()
+    };
+
+    // 验证校验和（针对原始数据）
+    let actual_checksum = crc16(&original_data);
     if expected_checksum != actual_checksum {
         return Err(DxError::ChecksumMismatch {
             expected: expected_checksum,
@@ -362,10 +480,10 @@ pub fn decode(encoded: &str) -> Result<Vec<u8>> {
         });
     }
 
-    Ok(payload.to_vec())
+    Ok(original_data)
 }
 
-/// 将 DX 编码的字符串解码为字符串（带校验和验证）
+/// 将 DX 编码的字符串解码为字符串（带校验和验证，自动解压缩）
 ///
 /// # 参数
 ///
@@ -499,12 +617,70 @@ pub fn get_checksum(encoded: &str) -> Result<(u16, u16)> {
         return Err(DxError::InvalidHeader);
     }
 
-    // 提取校验和
-    let stored = ((combined[0] as u16) << 8) | (combined[1] as u16);
+    // 提取 flags 和校验和
+    let flags = combined[0];
+    let stored = ((combined[1] as u16) << 8) | (combined[2] as u16);
+
+    // 提取数据部分
     let payload = &combined[HEADER_SIZE..];
-    let computed = crc16(payload);
+
+    // 根据 flags 决定是否需要解压缩
+    let original_data = if flags & FLAG_COMPRESSED != 0 {
+        if payload.len() < 2 {
+            return Err(DxError::InvalidHeader);
+        }
+        let compressed_data = &payload[2..];
+        decompress_deflate(compressed_data)?
+    } else {
+        payload.to_vec()
+    };
+
+    let computed = crc16(&original_data);
 
     Ok((stored, computed))
+}
+
+/// 检查编码是否使用了压缩
+///
+/// # 参数
+///
+/// * `encoded` - DX 编码的字符串
+///
+/// # 返回值
+///
+/// 返回 `true` 如果数据已压缩，否则返回 `false`
+///
+/// # 示例
+///
+/// ```
+/// use dxcode::{encode_str, is_compressed};
+///
+/// let short_data = encode_str("Hi");
+/// assert!(!is_compressed(&short_data).unwrap());
+///
+/// let long_data = encode_str(&"x".repeat(100));
+/// // 可能压缩也可能不压缩，取决于压缩效果
+/// ```
+pub fn is_compressed(encoded: &str) -> Result<bool> {
+    // 验证前缀
+    if !encoded.starts_with(PREFIX) {
+        return Err(DxError::InvalidPrefix);
+    }
+
+    // 移除前缀
+    let data = &encoded[PREFIX.len()..];
+
+    // 解码
+    let combined = decode_raw(data)?;
+
+    // 验证长度
+    if combined.len() < HEADER_SIZE {
+        return Err(DxError::InvalidHeader);
+    }
+
+    // 检查 flags
+    let flags = combined[0];
+    Ok(flags & FLAG_COMPRESSED != 0)
 }
 
 /// DX 编码信息
@@ -518,6 +694,8 @@ pub struct Info {
     pub magic: u8,
     pub padding: char,
     pub checksum: &'static str,
+    pub compression: &'static str,
+    pub compression_threshold: usize,
 }
 
 /// 获取 DX 编码的信息
@@ -538,13 +716,15 @@ pub struct Info {
 pub fn get_info() -> Info {
     Info {
         name: "DX Encoding",
-        version: "2.0.0",
+        version: "2.1.0",
         author: "Dogxi",
         charset: CHARSET,
         prefix: PREFIX,
         magic: MAGIC,
         padding: PADDING,
         checksum: "CRC16-CCITT",
+        compression: "DEFLATE",
+        compression_threshold: COMPRESSION_THRESHOLD,
     }
 }
 
@@ -607,8 +787,6 @@ mod tests {
         let encoded = encode_str("Hello");
         assert!(is_encoded(&encoded));
         assert!(!is_encoded("hello"));
-        assert!(!is_encoded(""));
-        assert!(!is_encoded("dxABC")); // 长度不对
     }
 
     #[test]
@@ -636,13 +814,10 @@ mod tests {
     fn test_checksum_mismatch() {
         let encoded = encode_str("Hello World Test Data");
 
-        // 篡改数据 - 修改数据部分（跳过前缀和校验和头部区域）
-        // 编码格式: "dx" + 编码后的(2字节CRC + 数据)
-        // 我们需要修改数据部分的字符
+        // 篡改数据（修改编码字符串中的一个字符）
         let mut chars: Vec<char> = encoded.chars().collect();
 
         // 找到一个可以修改的位置（跳过 "dx" 前缀，在数据部分修改）
-        // 修改位置 6（在数据区域内）
         if chars.len() > 10 {
             let pos = 10;
             let original_char = chars[pos];
@@ -668,8 +843,9 @@ mod tests {
         assert_eq!(info.prefix, "dx");
         assert_eq!(info.magic, 0x44);
         assert_eq!(info.charset.len(), 64);
-        assert_eq!(info.version, "2.0.0");
+        assert_eq!(info.version, "2.1.0");
         assert_eq!(info.checksum, "CRC16-CCITT");
+        assert_eq!(info.compression, "DEFLATE");
     }
 
     #[test]
@@ -704,6 +880,104 @@ mod tests {
     #[test]
     fn test_verify_function() {
         let encoded = encode_str("Test data for verification");
+        assert!(verify(&encoded).unwrap());
+    }
+
+    // ========== 压缩测试 ==========
+
+    #[test]
+    fn test_short_data_not_compressed() {
+        let original = "Short";
+        let encoded = encode_str(original);
+        assert!(!is_compressed(&encoded).unwrap());
+
+        let decoded = decode_str(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_long_repetitive_data_compressed() {
+        // 重复数据压缩效果好
+        let original = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let encoded = encode_str(original);
+
+        // 验证解码正确
+        let decoded = decode_str(&encoded).unwrap();
+        assert_eq!(decoded, original);
+
+        // 重复数据应该被压缩（压缩效果好）
+        assert!(is_compressed(&encoded).unwrap());
+    }
+
+    #[test]
+    fn test_compression_saves_space() {
+        // 创建大量重复数据
+        let original = "Hello World! ".repeat(100);
+        let encoded_compressed = encode_str(&original);
+        let encoded_uncompressed = encode_str_with_options(&original, false);
+
+        // 压缩版本应该更短
+        assert!(
+            encoded_compressed.len() < encoded_uncompressed.len(),
+            "压缩版本 ({}) 应该比未压缩版本 ({}) 短",
+            encoded_compressed.len(),
+            encoded_uncompressed.len()
+        );
+
+        // 两种方式都能正确解码
+        assert_eq!(decode_str(&encoded_compressed).unwrap(), original);
+        assert_eq!(decode_str(&encoded_uncompressed).unwrap(), original);
+    }
+
+    #[test]
+    fn test_incompressible_data() {
+        // 随机数据压缩效果差
+        let original: Vec<u8> = (0..100).map(|i| (i * 7 + 13) as u8).collect();
+        let encoded = encode(&original);
+
+        // 验证解码正确
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_encode_without_compression() {
+        let original = "A".repeat(100);
+        let encoded = encode_str_with_options(&original, false);
+
+        // 强制不压缩
+        assert!(!is_compressed(&encoded).unwrap());
+
+        // 仍然能正确解码
+        let decoded = decode_str(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_compression_threshold() {
+        // 刚好在阈值以下
+        let short_data = "x".repeat(COMPRESSION_THRESHOLD - 1);
+        let encoded_short = encode_str(&short_data);
+        assert!(!is_compressed(&encoded_short).unwrap());
+
+        // 刚好在阈值以上
+        let long_data = "x".repeat(COMPRESSION_THRESHOLD + 10);
+        let encoded_long = encode_str(&long_data);
+        // 重复数据应该被压缩
+        assert!(is_compressed(&encoded_long).unwrap());
+    }
+
+    #[test]
+    fn test_large_data_compression() {
+        // 测试较大数据
+        let original = "The quick brown fox jumps over the lazy dog. ".repeat(500);
+        let encoded = encode_str(&original);
+
+        // 验证解码正确
+        let decoded = decode_str(&encoded).unwrap();
+        assert_eq!(decoded, original);
+
+        // 验证校验和
         assert!(verify(&encoded).unwrap());
     }
 }

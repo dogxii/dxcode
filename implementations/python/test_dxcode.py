@@ -1,12 +1,13 @@
 """
 dxcode 测试文件
 由 Dogxi 创建
-v2.0 - 带 CRC16 校验和支持
+v2.1 - 带 CRC16 校验和和智能压缩支持
 """
 
 import unittest
 
 from dxcode import (
+    COMPRESSION_THRESHOLD,
     DX_CHARSET,
     MAGIC,
     PADDING,
@@ -19,6 +20,7 @@ from dxcode import (
     dx_verify,
     get_checksum,
     get_dx_info,
+    is_compressed,
     is_dx_encoded,
 )
 
@@ -139,6 +141,81 @@ class TestDxEncoding(unittest.TestCase):
         encoded = dx_encode(original)
         decoded = dx_decode(encoded, as_string=False)
         self.assertEqual(decoded, original)
+
+
+class TestCompression(unittest.TestCase):
+    """测试压缩功能"""
+
+    def test_short_data_not_compressed(self):
+        """测试短数据不压缩"""
+        original = "Hello"
+        encoded = dx_encode(original)
+        self.assertFalse(is_compressed(encoded))
+
+        decoded = dx_decode(encoded)
+        self.assertEqual(decoded, original)
+
+    def test_long_repetitive_data_compressed(self):
+        """测试长重复数据压缩"""
+        original = "A" * 100
+        encoded = dx_encode(original)
+
+        # 验证解码正确
+        decoded = dx_decode(encoded)
+        self.assertEqual(decoded, original)
+
+        # 重复数据应该被压缩
+        self.assertTrue(is_compressed(encoded))
+
+    def test_compression_saves_space(self):
+        """测试压缩节省空间"""
+        original = "Hello World! " * 100
+        encoded_compressed = dx_encode(original)
+        encoded_uncompressed = dx_encode(original, allow_compression=False)
+
+        # 压缩版本应该更短
+        self.assertLess(len(encoded_compressed), len(encoded_uncompressed))
+
+        # 两种方式都能正确解码
+        self.assertEqual(dx_decode(encoded_compressed), original)
+        self.assertEqual(dx_decode(encoded_uncompressed), original)
+
+    def test_encode_without_compression(self):
+        """测试禁用压缩"""
+        original = "A" * 100
+        encoded = dx_encode(original, allow_compression=False)
+
+        # 强制不压缩
+        self.assertFalse(is_compressed(encoded))
+
+        # 仍然能正确解码
+        decoded = dx_decode(encoded)
+        self.assertEqual(decoded, original)
+
+    def test_compression_threshold(self):
+        """测试压缩阈值"""
+        # 刚好在阈值以下
+        short_data = "x" * (COMPRESSION_THRESHOLD - 1)
+        encoded_short = dx_encode(short_data)
+        self.assertFalse(is_compressed(encoded_short))
+
+        # 刚好在阈值以上（重复数据）
+        long_data = "x" * (COMPRESSION_THRESHOLD + 10)
+        encoded_long = dx_encode(long_data)
+        # 重复数据应该被压缩
+        self.assertTrue(is_compressed(encoded_long))
+
+    def test_large_data_compression(self):
+        """测试较大数据压缩"""
+        original = "The quick brown fox jumps over the lazy dog. " * 500
+        encoded = dx_encode(original)
+
+        # 验证解码正确
+        decoded = dx_decode(encoded)
+        self.assertEqual(decoded, original)
+
+        # 验证校验和
+        self.assertTrue(dx_verify(encoded))
 
 
 class TestChecksum(unittest.TestCase):
@@ -321,12 +398,14 @@ class TestGetDxInfo(unittest.TestCase):
         """测试信息值"""
         info = get_dx_info()
         self.assertEqual(info["name"], "DX Encoding")
-        self.assertEqual(info["version"], "2.0.0")
+        self.assertEqual(info["version"], "2.1.0")
         self.assertEqual(info["author"], "Dogxi")
         self.assertEqual(info["prefix"], "dx")
         self.assertEqual(info["magic"], 0x44)
         self.assertEqual(info["padding"], "=")
         self.assertEqual(info["checksum"], "CRC16-CCITT")
+        self.assertEqual(info["compression"], "DEFLATE")
+        self.assertEqual(info["compression_threshold"], COMPRESSION_THRESHOLD)
 
 
 class TestConstants(unittest.TestCase):
@@ -393,7 +472,7 @@ class TestRoundTrip(unittest.TestCase):
 
 if __name__ == "__main__":
     print("╔════════════════════════════════════════════════════════════╗")
-    print("║          DX Encoding Python 测试套件 v2.0                  ║")
+    print("║          DX Encoding Python 测试套件 v2.1                  ║")
     print("║              由 Dogxi 创建                                 ║")
     print("╚════════════════════════════════════════════════════════════╝")
     print()
@@ -407,6 +486,8 @@ if __name__ == "__main__":
     print(f"   前缀: {info['prefix']}")
     print(f"   魔数: 0x{info['magic']:02X}")
     print(f"   校验和: {info['checksum']}")
+    print(f"   压缩算法: {info['compression']}")
+    print(f"   压缩阈值: {info['compression_threshold']} 字节")
     print()
 
     # 运行测试

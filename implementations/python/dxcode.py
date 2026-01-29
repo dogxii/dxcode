@@ -4,12 +4,14 @@ DX Encoding - 带有 `dx` 前缀的自定义编码算法
 Python 实现
 
 作者: Dogxi
-版本: 2.0.0
+版本: 2.1.0
 许可证: MIT
 
 v2.0 新增: CRC16-CCITT 校验和支持
+v2.1 新增: 智能 DEFLATE 压缩支持
 """
 
+import zlib
 from typing import Tuple, Union
 
 # DX 字符集 - 以 DXdx 开头作为签名，共64个字符
@@ -24,8 +26,15 @@ PREFIX = "dx"
 # 填充字符
 PADDING = "="
 
-# 头部大小（2字节 CRC16）
-HEADER_SIZE = 2
+# 头部大小（1字节 flags + 2字节 CRC16）
+HEADER_SIZE = 3
+
+# 压缩阈值（字节数），小于此值不压缩
+COMPRESSION_THRESHOLD = 32
+
+# Flags 位定义
+FLAG_COMPRESSED = 0x01
+FLAG_ALGO_DEFLATE = 0x02
 
 # 构建反向查找表
 DX_DECODE_MAP = {char: idx for idx, char in enumerate(DX_CHARSET)}
@@ -57,6 +66,12 @@ class DxChecksumError(DxEncodingError):
         super().__init__(f"校验和不匹配：期望 0x{expected:04X}，实际 0x{actual:04X}")
 
 
+class DxCompressionError(DxEncodingError):
+    """DX 压缩/解压缩错误"""
+
+    pass
+
+
 def crc16(data: bytes) -> int:
     """
     计算 CRC16-CCITT 校验和
@@ -72,6 +87,42 @@ def crc16(data: bytes) -> int:
         index = ((crc >> 8) ^ byte) & 0xFF
         crc = ((crc << 8) ^ CRC16_TABLE[index]) & 0xFFFF
     return crc
+
+
+def _compress_deflate(data: bytes) -> bytes:
+    """
+    使用 DEFLATE 压缩数据
+
+    参数:
+        data: 要压缩的数据
+
+    返回:
+        压缩后的数据（raw deflate，无 zlib 头）
+    """
+    # 使用 zlib 压缩，去掉头部和尾部校验
+    compressor = zlib.compressobj(
+        zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -zlib.MAX_WBITS
+    )
+    compressed = compressor.compress(data)
+    compressed += compressor.flush()
+    return compressed
+
+
+def _decompress_deflate(data: bytes) -> bytes:
+    """
+    使用 DEFLATE 解压缩数据
+
+    参数:
+        data: 压缩的数据（raw deflate）
+
+    返回:
+        解压缩后的数据
+    """
+    # 使用 raw deflate 解压
+    decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
+    decompressed = decompressor.decompress(data)
+    decompressed += decompressor.flush()
+    return decompressed
 
 
 def _encode_raw(data: bytes) -> str:
@@ -189,20 +240,25 @@ def _decode_raw(data: str) -> bytes:
     return bytes(result)
 
 
-def dx_encode(data: Union[str, bytes, bytearray]) -> str:
+def dx_encode(
+    data: Union[str, bytes, bytearray], allow_compression: bool = True
+) -> str:
     """
-    将数据编码为 DX 格式（带 CRC16 校验和）
+    将数据编码为 DX 格式（带 CRC16 校验和和智能压缩）
 
     参数:
         data: 要编码的数据（字符串、bytes 或 bytearray）
+        allow_compression: 是否允许压缩（默认 True）
 
     返回:
-        以 'dx' 为前缀的编码字符串（包含校验和）
+        以 'dx' 为前缀的编码字符串（包含校验和，可能压缩）
 
     示例:
         >>> dx_encode('Hello, Dogxi!')
         'dxXXXX...'
         >>> dx_encode(b'\\x00\\x01\\x02')
+        'dxXXXX...'
+        >>> dx_encode('long text...', allow_compression=False)  # 禁用压缩
         'dxXXXX...'
     """
     # 将输入转换为字节
@@ -213,14 +269,34 @@ def dx_encode(data: Union[str, bytes, bytearray]) -> str:
     elif not isinstance(data, bytes):
         raise DxEncodingError("输入必须是 str、bytes 或 bytearray")
 
-    # 计算 CRC16
+    # 计算原始数据的 CRC16
     checksum = crc16(data)
 
-    # 构建头部（2字节 CRC16，大端序）
-    header = bytes([checksum >> 8, checksum & 0xFF])
+    # 决定是否压缩
+    flags = 0
+    payload = data
+
+    if allow_compression and len(data) >= COMPRESSION_THRESHOLD:
+        try:
+            compressed = _compress_deflate(data)
+            # 压缩后需要额外存储 2 字节原始大小
+            # 只有当压缩后的大小 + 2 < 原始大小时才使用压缩
+            if len(compressed) + 2 < len(data) and len(data) <= 65535:
+                # 使用压缩
+                flags = FLAG_COMPRESSED | FLAG_ALGO_DEFLATE
+                # 存储原始大小（大端序）+ 压缩数据
+                payload = (
+                    bytes([(len(data) >> 8) & 0xFF, len(data) & 0xFF]) + compressed
+                )
+        except Exception:
+            # 压缩失败，使用原始数据
+            pass
+
+    # 构建头部（1字节 flags + 2字节 CRC16，大端序）
+    header = bytes([flags, (checksum >> 8) & 0xFF, checksum & 0xFF])
 
     # 合并头部和数据
-    combined = header + data
+    combined = header + payload
 
     # 编码
     return PREFIX + _encode_raw(combined)
@@ -228,7 +304,7 @@ def dx_encode(data: Union[str, bytes, bytearray]) -> str:
 
 def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
     """
-    将 DX 编码的字符串解码（带校验和验证）
+    将 DX 编码的字符串解码（带校验和验证，自动解压缩）
 
     参数:
         encoded: DX 编码的字符串（必须以 'dx' 开头）
@@ -262,23 +338,47 @@ def dx_decode(encoded: str, as_string: bool = True) -> Union[str, bytes]:
         raise DxEncodingError("无效的格式头部")
 
     # 提取头部
-    expected_checksum = (combined[0] << 8) | combined[1]
+    flags = combined[0]
+    expected_checksum = (combined[1] << 8) | combined[2]
 
-    # 提取数据
+    # 验证 flags
+    if flags > 0x03:
+        raise DxEncodingError(f"无效的 flags 字节：0x{flags:02X}")
+
+    # 提取数据部分
     payload = combined[HEADER_SIZE:]
 
-    # 验证校验和
-    actual_checksum = crc16(payload)
+    # 根据 flags 决定是否需要解压缩
+    if flags & FLAG_COMPRESSED:
+        # 数据已压缩，需要解压
+        if len(payload) < 2:
+            raise DxEncodingError("无效的格式头部")
+
+        # 提取原始大小（用于验证）
+        _original_size = (payload[0] << 8) | payload[1]
+
+        # 解压缩
+        compressed_data = payload[2:]
+        try:
+            original_data = _decompress_deflate(compressed_data)
+        except Exception as e:
+            raise DxCompressionError(f"解压缩失败: {e}")
+    else:
+        # 数据未压缩
+        original_data = payload
+
+    # 验证校验和（针对原始数据）
+    actual_checksum = crc16(original_data)
     if expected_checksum != actual_checksum:
         raise DxChecksumError(expected_checksum, actual_checksum)
 
     if as_string:
         try:
-            return payload.decode("utf-8")
+            return original_data.decode("utf-8")
         except UnicodeDecodeError as e:
             raise DxEncodingError(f"解码后的数据不是有效的 UTF-8: {e}")
 
-    return payload
+    return original_data
 
 
 def is_dx_encoded(s: str) -> bool:
@@ -377,12 +477,62 @@ def get_checksum(encoded: str) -> Tuple[int, int]:
     if len(combined) < HEADER_SIZE:
         raise DxEncodingError("无效的格式头部")
 
-    # 提取校验和
-    stored = (combined[0] << 8) | combined[1]
+    # 提取 flags 和校验和
+    flags = combined[0]
+    stored = (combined[1] << 8) | combined[2]
     payload = combined[HEADER_SIZE:]
-    computed = crc16(payload)
+
+    # 根据 flags 决定是否需要解压缩
+    if flags & FLAG_COMPRESSED:
+        if len(payload) < 2:
+            raise DxEncodingError("无效的格式头部")
+        compressed_data = payload[2:]
+        try:
+            original_data = _decompress_deflate(compressed_data)
+        except Exception as e:
+            raise DxCompressionError(f"解压缩失败: {e}")
+    else:
+        original_data = payload
+
+    computed = crc16(original_data)
 
     return (stored, computed)
+
+
+def is_compressed(encoded: str) -> bool:
+    """
+    检查编码是否使用了压缩
+
+    参数:
+        encoded: DX 编码的字符串
+
+    返回:
+        是否使用了压缩
+
+    异常:
+        DxEncodingError: 如果输入不是有效的 DX 编码
+
+    示例:
+        >>> is_compressed('dxXXXX...')
+        True 或 False
+    """
+    # 验证前缀
+    if not encoded or not encoded.startswith(PREFIX):
+        raise DxEncodingError("无效的 DX 编码：缺少 dx 前缀")
+
+    # 移除前缀
+    data = encoded[len(PREFIX) :]
+
+    # 解码
+    combined = _decode_raw(data)
+
+    # 验证长度
+    if len(combined) < HEADER_SIZE:
+        raise DxEncodingError("无效的格式头部")
+
+    # 检查 flags
+    flags = combined[0]
+    return (flags & FLAG_COMPRESSED) != 0
 
 
 def get_dx_info() -> dict:
@@ -394,13 +544,15 @@ def get_dx_info() -> dict:
     """
     return {
         "name": "DX Encoding",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "author": "Dogxi",
         "charset": DX_CHARSET,
         "prefix": PREFIX,
         "magic": MAGIC,
         "padding": PADDING,
         "checksum": "CRC16-CCITT",
+        "compression": "DEFLATE",
+        "compression_threshold": COMPRESSION_THRESHOLD,
     }
 
 
@@ -417,16 +569,18 @@ def __main__():
     import sys
 
     if len(sys.argv) < 2:
-        print("DX Encoding - 由 Dogxi 创造 (v2.0 带校验和)")
+        print("DX Encoding - 由 Dogxi 创造 (v2.1 带校验和和智能压缩)")
         print()
         print("用法:")
         print("  python dxcode.py encode <文本>")
+        print("  python dxcode.py encode --no-compress <文本>")
         print("  python dxcode.py decode <编码>")
         print("  python dxcode.py verify <编码>")
         print("  python dxcode.py info")
         print()
         print("示例:")
         print("  python dxcode.py encode 'Hello, Dogxi!'")
+        print("  python dxcode.py encode --no-compress 'Hello World'")
         print("  python dxcode.py decode 'dxXXXX...'")
         print("  python dxcode.py verify 'dxXXXX...'")
         sys.exit(0)
@@ -441,14 +595,33 @@ def __main__():
         print(f"前缀: {info_data['prefix']}")
         print(f"魔数: 0x{info_data['magic']:02X}")
         print(f"校验和: {info_data['checksum']}")
+        print(f"压缩算法: {info_data['compression']}")
+        print(f"压缩阈值: {info_data['compression_threshold']} 字节")
         print(f"字符集: {info_data['charset']}")
     elif command == "encode":
         if len(sys.argv) < 3:
             print("错误: 请提供要编码的文本", file=sys.stderr)
             sys.exit(1)
-        text = sys.argv[2]
-        encoded = dx_encode(text)
+
+        # 检查是否有 --no-compress 标志
+        allow_compression = True
+        text_start_idx = 2
+
+        if sys.argv[2] == "--no-compress" or sys.argv[2] == "-nc":
+            allow_compression = False
+            text_start_idx = 3
+
+        if len(sys.argv) <= text_start_idx:
+            print("错误: 请提供要编码的文本", file=sys.stderr)
+            sys.exit(1)
+
+        text = sys.argv[text_start_idx]
+        encoded = dx_encode(text, allow_compression=allow_compression)
         print(encoded)
+
+        # 显示压缩状态
+        if is_compressed(encoded):
+            print("📦 已压缩", file=sys.stderr)
     elif command == "decode":
         if len(sys.argv) < 3:
             print("错误: 请提供要解码的字符串", file=sys.stderr)
@@ -470,6 +643,10 @@ def __main__():
                 stored, _ = get_checksum(encoded)
                 print(f"✅ 校验和验证通过")
                 print(f"   CRC16: 0x{stored:04X}")
+
+                # 显示压缩状态
+                if is_compressed(encoded):
+                    print(f"   📦 数据已压缩")
             else:
                 stored, computed = get_checksum(encoded)
                 print(f"❌ 校验和验证失败")
