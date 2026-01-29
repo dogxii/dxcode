@@ -4,7 +4,7 @@
 
 use dxcode::{decode_str, encode_str, get_info, is_encoded};
 use std::env;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Read};
 use std::process;
 
 fn print_help() {

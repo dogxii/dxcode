@@ -9,7 +9,7 @@ repository = "https://github.com/dogxii/dxcode"
 homepage = "https://dxc.dogxi.me"
 documentation = "https://docs.rs/dxcode"
 readme = "README.md"
-keywords = ["dx", "dxcode", "encoding", "decoding", "base64", "dogxi"]
+keywords = ["dxcode", "encoding", "decoding", "base64", "dogxi"]
 categories = ["encoding", "no-std"]
 
 [lib]
@@ -25,5 +25,6 @@ default = ["std"]
 std = []
 
 [dependencies]
+atty = "0.2"
 
 [dev-dependencies]
