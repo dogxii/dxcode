@@ -398,7 +398,7 @@ class TestGetDxInfo(unittest.TestCase):
         """测试信息值"""
         info = get_dx_info()
         self.assertEqual(info["name"], "DX Encoding")
-        self.assertEqual(info["version"], "2.1.0")
+        self.assertEqual(info["version"], "2.2.0")
         self.assertEqual(info["author"], "Dogxi")
         self.assertEqual(info["prefix"], "dx")
         self.assertEqual(info["magic"], 0x44)

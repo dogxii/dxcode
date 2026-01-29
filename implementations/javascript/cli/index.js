@@ -5,14 +5,24 @@
  * 命令行编码解码工具
  *
  * @author Dogxi
+ * @version 2.2.0
  * @license MIT
  */
 
-const { dxEncode, dxDecode, isDxEncoded, getDxInfo } = require("dxcode-lib");
+const {
+	dxEncode,
+	dxDecode,
+	isDxEncoded,
+	dxVerify,
+	getChecksum,
+	isCompressed,
+	getDxInfo,
+	isPakoAvailable,
+} = require("dxcode-lib");
 const fs = require("fs");
 const path = require("path");
 
-const VERSION = "1.0.0";
+const VERSION = "2.2.0";
 
 // 颜色输出
 const colors = {
@@ -24,6 +34,7 @@ const colors = {
 	yellow: "\x1b[33m",
 	red: "\x1b[31m",
 	magenta: "\x1b[35m",
+	blue: "\x1b[34m",
 };
 
 function c(color, text) {
@@ -48,8 +59,10 @@ ${c("yellow", "Options:")}
   ${c("green", "-d, --decode")}           强制解码模式
   ${c("green", "-f, --file")} <path>      从文件读取输入
   ${c("green", "-o, --output")} <path>    输出到文件
+  ${c("green", "-nc, --no-compress")}     禁用压缩
   ${c("green", "-c, --check")}            检查是否为有效 DX 编码
-  ${c("green", "-i, --info")}             显示 DX 编码信息
+  ${c("green", "--verify")}               验证校验和
+  ${c("green", "-i, --info")} [encoded]   显示编码信息（可选：分析已编码字符串）
   ${c("green", "-v, --version")}          显示版本
   ${c("green", "-h, --help")}             显示帮助
 
@@ -58,6 +71,9 @@ ${c("yellow", "Examples:")}
   dxc encode "Hello World"
   dxc -e "Hello World"
 
+  ${c("dim", "# 编码但禁用压缩")}
+  dxc encode "Hello World" --no-compress
+
   ${c("dim", "# 解码")}
   dxc decode "dxQBpXRwZXQBxdVwJdQBp="
   dxc -d "dxQBpXRwZXQBxdVwJdQBp="
@@ -65,6 +81,12 @@ ${c("yellow", "Examples:")}
   ${c("dim", "# 自动检测")}
   dxc "Hello World"              ${c("dim", "# 编码")}
   dxc "dxQBpXRwZXQBxdVwJdQBp="   ${c("dim", "# 解码")}
+
+  ${c("dim", "# 验证校验和")}
+  dxc --verify "dxQBpXRwZXQBxdVwJdQBp="
+
+  ${c("dim", "# 分析已编码字符串")}
+  dxc -i "dxQBpXRwZXQBxdVwJdQBp="
 
   ${c("dim", "# 文件操作")}
   dxc -f input.txt -o output.dx
@@ -84,21 +106,66 @@ function showVersion() {
 }
 
 // 显示编码信息
-function showInfo() {
+function showInfo(encoded = null) {
 	const info = getDxInfo();
+
 	console.log(`
 ${c("cyan", c("bold", "DX Encoding Info"))}
 
-${c("yellow", "Name:")}      ${info.name}
-${c("yellow", "Version:")}   ${info.version}
-${c("yellow", "Author:")}    ${info.author}
-${c("yellow", "Prefix:")}    ${c("green", info.prefix)}
-${c("yellow", "Magic:")}     0x${info.magic.toString(16).toUpperCase()} (${info.magic})
-${c("yellow", "Padding:")}   ${info.padding}
-${c("yellow", "Charset:")}   ${c("dim", info.charset)}
-
-${c("magenta", "https://dxc.dogxi.me")}
+${c("yellow", "Name:")}         ${info.name}
+${c("yellow", "Version:")}      ${info.version}
+${c("yellow", "Author:")}       ${info.author}
+${c("yellow", "Prefix:")}       ${c("green", info.prefix)}
+${c("yellow", "Magic:")}        0x${info.magic.toString(16).toUpperCase()} (${info.magic})
+${c("yellow", "Padding:")}      ${info.padding}
+${c("yellow", "Checksum:")}     ${info.checksum}
+${c("yellow", "Compression:")}  ${info.compression}
+${c("yellow", "Threshold:")}    ${info.compressionThreshold} bytes
+${c("yellow", "Pako:")}         ${info.pakoAvailable ? c("green", "available ✓") : c("yellow", "not available (using fallback)")}
+${c("yellow", "Charset:")}      ${c("dim", info.charset)}
 `);
+
+	// 如果提供了已编码字符串，分析它
+	if (encoded) {
+		console.log(`${c("cyan", c("bold", "Encoded String Analysis"))}`);
+		console.log("");
+
+		if (!isDxEncoded(encoded)) {
+			console.log(`  ${c("red", "✗")} 不是有效的 DX 编码`);
+			return;
+		}
+
+		try {
+			const checksumInfo = getChecksum(encoded);
+			const compressed = isCompressed(encoded);
+			const valid = dxVerify(encoded);
+
+			console.log(
+				`  ${c("yellow", "Valid:")}        ${valid ? c("green", "Yes ✓") : c("red", "No ✗")}`,
+			);
+			console.log(
+				`  ${c("yellow", "Compressed:")}   ${compressed ? c("blue", "Yes") : "No"}`,
+			);
+			console.log(
+				`  ${c("yellow", "Stored CRC:")}   0x${checksumInfo.stored.toString(16).toUpperCase().padStart(4, "0")}`,
+			);
+			console.log(
+				`  ${c("yellow", "Computed CRC:")} 0x${checksumInfo.computed.toString(16).toUpperCase().padStart(4, "0")}`,
+			);
+			console.log(`  ${c("yellow", "Length:")}       ${encoded.length} chars`);
+
+			if (valid) {
+				const decoded = dxDecode(encoded);
+				console.log(
+					`  ${c("yellow", "Decoded size:")} ${new TextEncoder().encode(decoded).length} bytes`,
+				);
+			}
+		} catch (err) {
+			console.log(`  ${c("red", "Error:")} ${err.message}`);
+		}
+	}
+
+	console.log(`${c("magenta", "https://dxc.dogxi.me")}`);
 }
 
 // 检查是否为 DX 编码
@@ -109,6 +176,39 @@ function checkEncoding(text) {
 		process.exit(0);
 	} else {
 		console.log(`${c("red", "✗")} 不是有效的 DX 编码`);
+		process.exit(1);
+	}
+}
+
+// 验证校验和
+function verifyChecksum(text) {
+	if (!isDxEncoded(text)) {
+		console.log(`${c("red", "✗")} 不是有效的 DX 编码`);
+		process.exit(1);
+	}
+
+	try {
+		const valid = dxVerify(text);
+		const checksumInfo = getChecksum(text);
+
+		if (valid) {
+			console.log(`${c("green", "✓")} 校验和验证通过`);
+			console.log(
+				`  CRC16: 0x${checksumInfo.stored.toString(16).toUpperCase().padStart(4, "0")}`,
+			);
+			process.exit(0);
+		} else {
+			console.log(`${c("red", "✗")} 校验和验证失败`);
+			console.log(
+				`  存储: 0x${checksumInfo.stored.toString(16).toUpperCase().padStart(4, "0")}`,
+			);
+			console.log(
+				`  计算: 0x${checksumInfo.computed.toString(16).toUpperCase().padStart(4, "0")}`,
+			);
+			process.exit(1);
+		}
+	} catch (err) {
+		console.log(`${c("red", "✗")} 验证失败: ${err.message}`);
 		process.exit(1);
 	}
 }
@@ -148,6 +248,9 @@ async function main() {
 	let inputFile = null;
 	let outputFile = null;
 	let check = false;
+	let verify = false;
+	let showInfoFlag = false;
+	let noCompress = false;
 	let input = null;
 
 	for (let i = 0; i < args.length; i++) {
@@ -168,8 +271,7 @@ async function main() {
 
 			case "-i":
 			case "--info":
-				showInfo();
-				process.exit(0);
+				showInfoFlag = true;
 				break;
 
 			case "-e":
@@ -199,12 +301,27 @@ async function main() {
 				check = true;
 				break;
 
+			case "--verify":
+				verify = true;
+				break;
+
+			case "-nc":
+			case "--no-compress":
+				noCompress = true;
+				break;
+
 			default:
 				if (!arg.startsWith("-") && input === null) {
 					input = arg;
 				}
 				break;
 		}
+	}
+
+	// 如果只是显示信息
+	if (showInfoFlag && input === null && inputFile === null) {
+		showInfo();
+		process.exit(0);
 	}
 
 	// 读取输入
@@ -225,9 +342,21 @@ async function main() {
 		process.exit(0);
 	}
 
+	// 显示信息模式（带编码字符串分析）
+	if (showInfoFlag) {
+		showInfo(input);
+		process.exit(0);
+	}
+
 	// 检查模式
 	if (check) {
 		checkEncoding(input);
+		return;
+	}
+
+	// 验证模式
+	if (verify) {
+		verifyChecksum(input);
 		return;
 	}
 
@@ -240,7 +369,7 @@ async function main() {
 	let result;
 	try {
 		if (mode === "encode") {
-			result = dxEncode(input);
+			result = dxEncode(input, { compress: !noCompress });
 		} else {
 			result = dxDecode(input);
 		}

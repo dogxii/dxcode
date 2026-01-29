@@ -2,11 +2,12 @@
  * DX Encoding - 带有 `dx` 前缀的自定义编码算法
  *
  * @author Dogxi
- * @version 2.1.0
+ * @version 2.2.0
  * @license MIT
  *
  * v2.0 新增: CRC16-CCITT 校验和支持
  * v2.1 新增: 智能 DEFLATE 压缩支持
+ * v2.2 新增: 使用 pako 实现真正的 DEFLATE 压缩
  */
 
 // DX 字符集 - 以 DXdx 开头作为签名，共64个字符
@@ -87,14 +88,30 @@ function bytesToString(bytes) {
 }
 
 // ============================================================================
-// DEFLATE 压缩/解压缩实现 (纯 JavaScript，无外部依赖)
+// DEFLATE 压缩/解压缩实现
+// 优先使用 pako，回退到简单实现
 // ============================================================================
 
+let pako = null;
+
+// 尝试加载 pako
+try {
+	if (typeof require !== "undefined") {
+		// Node.js CommonJS
+		pako = require("pako");
+	} else if (typeof window !== "undefined" && window.pako) {
+		// 浏览器全局变量
+		pako = window.pako;
+	}
+} catch (e) {
+	// pako 不可用，使用回退实现
+}
+
 /**
- * 简单的 DEFLATE 压缩实现
- * 使用 LZ77 + 固定 Huffman 编码
+ * 简单的 DEFLATE 压缩实现（回退方案）
+ * 使用存储块（无压缩）
  */
-class DeflateCompressor {
+class FallbackDeflateCompressor {
 	constructor() {
 		this.output = [];
 		this.bitBuffer = 0;
@@ -111,15 +128,8 @@ class DeflateCompressor {
 		}
 	}
 
-	flush() {
-		if (this.bitCount > 0) {
-			this.output.push(this.bitBuffer & 0xff);
-		}
-		return new Uint8Array(this.output);
-	}
-
 	compress(data) {
-		// 使用存储块（无压缩）作为简单实现
+		// 使用存储块（无压缩）作为回退实现
 		// BFINAL=1, BTYPE=00 (无压缩)
 		this.writeBits(1, 1); // BFINAL
 		this.writeBits(0, 2); // BTYPE = 00 (stored)
@@ -148,9 +158,9 @@ class DeflateCompressor {
 }
 
 /**
- * 简单的 DEFLATE 解压缩实现
+ * 简单的 DEFLATE 解压缩实现（回退方案）
  */
-class DeflateDecompressor {
+class FallbackDeflateDecompressor {
 	constructor(data) {
 		this.data = data;
 		this.pos = 0;
@@ -171,16 +181,6 @@ class DeflateDecompressor {
 		this.bitBuffer >>= bits;
 		this.bitCount -= bits;
 		return value;
-	}
-
-	readByte() {
-		// 对齐到字节边界
-		this.bitBuffer = 0;
-		this.bitCount = 0;
-		if (this.pos >= this.data.length) {
-			throw new Error("Unexpected end of data");
-		}
-		return this.data[this.pos++];
 	}
 
 	decompress() {
@@ -209,9 +209,9 @@ class DeflateDecompressor {
 					this.output.push(this.data[this.pos++]);
 				}
 			} else if (btype === 1 || btype === 2) {
-				// 固定或动态 Huffman - 简化实现，只支持存储块
+				// 固定或动态 Huffman - 回退实现不支持，需要 pako
 				throw new Error(
-					"Huffman compression not supported in this implementation",
+					"Huffman compression requires pako library. Please install: npm install pako",
 				);
 			} else {
 				throw new Error("Invalid block type");
@@ -228,8 +228,15 @@ class DeflateDecompressor {
  * @returns {Uint8Array} 压缩后的数据
  */
 function compressDeflate(data) {
-	const compressor = new DeflateCompressor();
-	return compressor.compress(data);
+	if (pako) {
+		// 使用 pako 进行真正的 DEFLATE 压缩
+		// raw: true 表示不包含 zlib 头部和尾部
+		return pako.deflateRaw(data, { level: 9 });
+	} else {
+		// 回退到存储块实现
+		const compressor = new FallbackDeflateCompressor();
+		return compressor.compress(data);
+	}
 }
 
 /**
@@ -238,8 +245,22 @@ function compressDeflate(data) {
  * @returns {Uint8Array} 解压缩后的数据
  */
 function decompressDeflate(data) {
-	const decompressor = new DeflateDecompressor(data);
-	return decompressor.decompress();
+	if (pako) {
+		// 使用 pako 进行解压缩
+		return pako.inflateRaw(data);
+	} else {
+		// 回退到简单实现（只支持存储块）
+		const decompressor = new FallbackDeflateDecompressor(data);
+		return decompressor.decompress();
+	}
+}
+
+/**
+ * 检查 pako 是否可用
+ * @returns {boolean}
+ */
+function isPakoAvailable() {
+	return pako !== null;
 }
 
 // ============================================================================
@@ -661,7 +682,7 @@ function isCompressed(encoded) {
 function getDxInfo() {
 	return {
 		name: "DX Encoding",
-		version: "2.1.0",
+		version: "2.2.0",
 		author: "Dogxi",
 		charset: DX_CHARSET,
 		prefix: PREFIX,
@@ -670,6 +691,7 @@ function getDxInfo() {
 		checksum: "CRC16-CCITT",
 		compression: "DEFLATE",
 		compressionThreshold: COMPRESSION_THRESHOLD,
+		pakoAvailable: isPakoAvailable(),
 	};
 }
 
@@ -683,6 +705,7 @@ if (typeof module !== "undefined" && module.exports) {
 		getChecksum,
 		isCompressed,
 		getDxInfo,
+		isPakoAvailable,
 		crc16,
 		DX_CHARSET,
 		PREFIX,
@@ -701,6 +724,7 @@ export {
 	getChecksum,
 	isCompressed,
 	getDxInfo,
+	isPakoAvailable,
 	crc16,
 	DX_CHARSET,
 	PREFIX,
@@ -717,5 +741,6 @@ export default {
 	getChecksum,
 	isCompressed,
 	info: getDxInfo,
+	isPakoAvailable,
 	crc16,
 };

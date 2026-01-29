@@ -387,8 +387,33 @@
                 ><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" /></svg
               >
             </div>
-            <h3>URL 安全</h3>
-            <p>使用自定义字符集，原生支持 URL 传输，无需额外的转义处理。</p>
+            <h3>CRC16 校验</h3>
+            <p>内置 CRC16-CCITT 校验和，自动检测数据完整性，防止意外损坏。</p>
+          </div>
+          <div class="feature-card card">
+            <div class="feature-icon">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+                /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line
+                  x1="12"
+                  y1="22.08"
+                  x2="12"
+                  y2="12"
+                /></svg
+              >
+            </div>
+            <h3>智能压缩</h3>
+            <p>DEFLATE 压缩算法，≥32 字节自动压缩，减小编码体积。</p>
           </div>
           <div class="feature-card card">
             <div class="feature-icon">
@@ -408,7 +433,7 @@
               >
             </div>
             <h3>易于识别</h3>
-            <p>强制性的 <code>dx</code> 前缀，让编码数据一目了然，不再混淆。</p>
+            <p>强制性的 <code>dx</code> 前缀，URL 安全字符集，一目了然。</p>
           </div>
           <div class="feature-card card">
             <div class="feature-icon">

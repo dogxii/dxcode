@@ -1,6 +1,6 @@
 {
 	"name": "dxcode-lib",
-	"version": "2.1.0",
+	"version": "2.2.0",
 	"description": "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix, CRC16 checksum, and smart compression.",
 	"author": "Dogxi",
 	"license": "MIT",
@@ -43,5 +43,8 @@
 	"homepage": "https://dxc.dogxi.me",
 	"engines": {
 		"node": ">=12.0.0"
+	},
+	"dependencies": {
+		"pako": "^2.1.0"
 	}
 }

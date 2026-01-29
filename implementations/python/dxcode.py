@@ -544,7 +544,7 @@ def get_dx_info() -> dict:
     """
     return {
         "name": "DX Encoding",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "author": "Dogxi",
         "charset": DX_CHARSET,
         "prefix": PREFIX,

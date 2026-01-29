@@ -1,6 +1,6 @@
 //! dxcode 命令行工具
 //!
-//! 由 Dogxi 创建 - v2.1.0
+//! 由 Dogxi 创建 - v2.2.0
 
 use dxcode::{decode_str, encode_str_with_options, get_checksum, get_info, is_compressed, is_encoded, verify};
 use std::env;

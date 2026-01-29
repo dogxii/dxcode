@@ -1,18 +1,35 @@
 /**
  * DX Encoding - TypeScript 类型定义
  * 由 Dogxi 创建
- * @version 2.0.0
+ * @version 2.2.0
  */
 
 /**
- * 将字符串或字节数组编码为 DX 格式（带 CRC16 校验和）
+ * 编码选项
+ */
+export interface EncodeOptions {
+  /** 是否允许压缩（默认 true） */
+  compress?: boolean;
+}
+
+/**
+ * 解码选项
+ */
+export interface DecodeOptions {
+  /** 是否返回字符串（默认 true） */
+  asString?: boolean;
+}
+
+/**
+ * 将字符串或字节数组编码为 DX 格式（带 CRC16 校验和和智能压缩）
  * @param input - 要编码的输入数据（字符串或 Uint8Array）
+ * @param options - 编码选项
  * @returns 以 'dx' 为前缀的编码字符串（包含校验和）
  */
-export function dxEncode(input: string | Uint8Array | number[]): string;
+export function dxEncode(input: string | Uint8Array | number[], options?: EncodeOptions): string;
 
 /**
- * 将 DX 编码的字符串解码为原始数据（带校验和验证）
+ * 将 DX 编码的字符串解码为原始数据（带校验和验证，自动解压缩）
  * @param encoded - DX 编码的字符串（必须以 'dx' 开头）
  * @param options - 解码选项
  * @returns 解码后的字符串或 Uint8Array
@@ -20,7 +37,7 @@ export function dxEncode(input: string | Uint8Array | number[]): string;
  */
 export function dxDecode(encoded: string, options?: { asString?: true }): string;
 export function dxDecode(encoded: string, options: { asString: false }): Uint8Array;
-export function dxDecode(encoded: string, options?: { asString?: boolean }): string | Uint8Array;
+export function dxDecode(encoded: string, options?: DecodeOptions): string | Uint8Array;
 
 /**
  * 检查字符串是否为有效的 DX 编码
@@ -46,6 +63,20 @@ export function dxVerify(encoded: string): boolean;
 export function getChecksum(encoded: string): { stored: number; computed: number };
 
 /**
+ * 检查编码是否使用了压缩
+ * @param encoded - DX 编码的字符串
+ * @returns 是否使用了压缩
+ * @throws 如果输入不是有效的 DX 编码字符串
+ */
+export function isCompressed(encoded: string): boolean;
+
+/**
+ * 检查 pako 库是否可用
+ * @returns pako 是否已加载
+ */
+export function isPakoAvailable(): boolean;
+
+/**
  * 计算 CRC16-CCITT 校验和
  * @param data - 输入字节数组
  * @returns 16位校验和
@@ -65,6 +96,9 @@ export function getDxInfo(): {
   magic: number;
   padding: string;
   checksum: string;
+  compression: string;
+  compressionThreshold: number;
+  pakoAvailable: boolean;
 };
 
 /**
@@ -87,13 +121,20 @@ export const PREFIX: string;
  */
 export const PADDING: string;
 
+/**
+ * 压缩阈值（字节数）
+ */
+export const COMPRESSION_THRESHOLD: number;
+
 declare const _default: {
   encode: typeof dxEncode;
   decode: typeof dxDecode;
   isEncoded: typeof isDxEncoded;
   verify: typeof dxVerify;
   getChecksum: typeof getChecksum;
+  isCompressed: typeof isCompressed;
   info: typeof getDxInfo;
+  isPakoAvailable: typeof isPakoAvailable;
   crc16: typeof crc16;
 };
 

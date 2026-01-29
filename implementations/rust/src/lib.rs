@@ -26,7 +26,7 @@
 //!
 //! # 版本
 //!
-//! 2.1.0
+//! 2.2.0
 //!
 //! # 许可证
 //!
@@ -716,7 +716,7 @@ pub struct Info {
 pub fn get_info() -> Info {
     Info {
         name: "DX Encoding",
-        version: "2.1.0",
+        version: "2.2.0",
         author: "Dogxi",
         charset: CHARSET,
         prefix: PREFIX,
@@ -843,7 +843,7 @@ mod tests {
         assert_eq!(info.prefix, "dx");
         assert_eq!(info.magic, 0x44);
         assert_eq!(info.charset.len(), 64);
-        assert_eq!(info.version, "2.1.0");
+        assert_eq!(info.version, "2.2.0");
         assert_eq!(info.checksum, "CRC16-CCITT");
         assert_eq!(info.compression, "DEFLATE");
     }
