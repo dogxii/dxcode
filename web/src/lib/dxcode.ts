@@ -440,6 +440,8 @@ export function dxEncode(
 export interface DxDecodeOptions {
 	/** 是否返回字符串（默认 true） */
 	asString?: boolean;
+	/** 是否检查 TTL 过期（默认 true） */
+	checkTtl?: boolean;
 }
 
 /**
@@ -485,14 +487,49 @@ export function dxDecode(
 	const expectedChecksum = (combined[1] << 8) | combined[2];
 
 	// 验证 flags
-	if (flags > 0x03) {
+	if ((flags & ~VALID_FLAGS_MASK) !== 0) {
 		throw new DxEncodingError(
 			`无效的 flags 字节：0x${flags.toString(16).padStart(2, "0")}`,
 		);
 	}
 
+	// 检查 TTL
+	let payloadStart = HEADER_SIZE;
+	if (flags & FLAG_HAS_TTL) {
+		if (combined.length < HEADER_SIZE + TTL_HEADER_SIZE) {
+			throw new DxEncodingError("无效的 TTL 头部");
+		}
+
+		// 读取 TTL 信息
+		const createdAt =
+			(combined[HEADER_SIZE] << 24) |
+			(combined[HEADER_SIZE + 1] << 16) |
+			(combined[HEADER_SIZE + 2] << 8) |
+			combined[HEADER_SIZE + 3];
+
+		const ttlSeconds =
+			(combined[HEADER_SIZE + 4] << 24) |
+			(combined[HEADER_SIZE + 5] << 16) |
+			(combined[HEADER_SIZE + 6] << 8) |
+			combined[HEADER_SIZE + 7];
+
+		// 检查是否过期（仅当 checkTtl !== false 且 ttlSeconds > 0）
+		if (options.checkTtl !== false && ttlSeconds > 0) {
+			const now = Math.floor(Date.now() / 1000);
+			const expiresAt = createdAt + ttlSeconds;
+			if (now > expiresAt) {
+				throw new DxEncodingError(
+					`数据已过期：创建于 ${new Date(createdAt * 1000).toISOString()}，` +
+						`有效期 ${ttlSeconds} 秒，已于 ${new Date(expiresAt * 1000).toISOString()} 过期`,
+				);
+			}
+		}
+
+		payloadStart = HEADER_SIZE + TTL_HEADER_SIZE;
+	}
+
 	// 提取数据部分
-	const payload = combined.slice(HEADER_SIZE);
+	const payload = combined.slice(payloadStart);
 
 	// 根据 flags 决定是否需要解压缩
 	let originalData: Uint8Array;
@@ -670,6 +707,201 @@ export function isCompressed(encoded: string): boolean {
 }
 
 /**
+ * TTL 信息接口
+ */
+export interface TtlInfo {
+	createdAt: number;
+	ttlSeconds: number;
+	expiresAt: number | null;
+	isExpired: boolean;
+}
+
+/**
+ * 检查编码是否包含 TTL
+ *
+ * @param encoded - DX 编码的字符串
+ * @returns 是否包含 TTL
+ */
+export function hasTtl(encoded: string): boolean {
+	if (!encoded || !encoded.startsWith(PREFIX)) {
+		throw new DxEncodingError("无效的 DX 编码：缺少 dx 前缀");
+	}
+
+	const data = encoded.slice(PREFIX.length);
+	const combined = decodeRaw(data);
+
+	if (combined.length < HEADER_SIZE) {
+		throw new DxEncodingError("无效的格式头部");
+	}
+
+	const flags = combined[0];
+	return (flags & FLAG_HAS_TTL) !== 0;
+}
+
+/**
+ * 获取编码的 TTL 信息
+ *
+ * @param encoded - DX 编码的字符串
+ * @returns TTL 信息，如果没有 TTL 返回 null
+ *
+ * @example
+ * getTtlInfo('dxXXXX...')  // { createdAt, ttlSeconds, expiresAt, isExpired }
+ */
+export function getTtlInfo(encoded: string): TtlInfo | null {
+	if (!encoded || !encoded.startsWith(PREFIX)) {
+		throw new DxEncodingError("无效的 DX 编码：缺少 dx 前缀");
+	}
+
+	const data = encoded.slice(PREFIX.length);
+	const combined = decodeRaw(data);
+
+	if (combined.length < HEADER_SIZE) {
+		throw new DxEncodingError("无效的格式头部");
+	}
+
+	const flags = combined[0];
+
+	if ((flags & FLAG_HAS_TTL) === 0) {
+		return null;
+	}
+
+	if (combined.length < HEADER_SIZE + TTL_HEADER_SIZE) {
+		throw new DxEncodingError("无效的格式头部");
+	}
+
+	const createdAt =
+		(combined[HEADER_SIZE] << 24) |
+		(combined[HEADER_SIZE + 1] << 16) |
+		(combined[HEADER_SIZE + 2] << 8) |
+		combined[HEADER_SIZE + 3];
+
+	const ttlSeconds =
+		(combined[HEADER_SIZE + 4] << 24) |
+		(combined[HEADER_SIZE + 5] << 16) |
+		(combined[HEADER_SIZE + 6] << 8) |
+		combined[HEADER_SIZE + 7];
+
+	const now = Math.floor(Date.now() / 1000);
+
+	let expiresAt: number | null = null;
+	let isExpired = false;
+
+	if (ttlSeconds === 0) {
+		// 永不过期
+		expiresAt = null;
+		isExpired = false;
+	} else {
+		expiresAt = createdAt + ttlSeconds;
+		isExpired = now > expiresAt;
+	}
+
+	return {
+		createdAt,
+		ttlSeconds,
+		expiresAt,
+		isExpired,
+	};
+}
+
+/**
+ * 检查编码是否已过期
+ *
+ * @param encoded - DX 编码的字符串
+ * @returns 是否已过期（没有 TTL 的数据返回 false）
+ */
+export function isExpired(encoded: string): boolean {
+	const info = getTtlInfo(encoded);
+	if (info === null) {
+		return false; // 没有 TTL 的数据永不过期
+	}
+	return info.isExpired;
+}
+
+/**
+ * TTL 编码选项
+ */
+export interface DxEncodeWithTtlOptions {
+	compress?: boolean;
+}
+
+/**
+ * 使用 TTL 编码数据
+ *
+ * @param input - 要编码的数据
+ * @param ttlSeconds - 有效期（秒），0 表示永不过期
+ * @param options - 选项
+ * @returns 带有 TTL 的 DX 编码字符串
+ *
+ * @example
+ * dxEncodeWithTtl('Hello', 3600)  // 1小时有效期
+ * dxEncodeWithTtl('Data', 86400, { compress: false })  // 1天，禁用压缩
+ */
+export function dxEncodeWithTtl(
+	input: string | Uint8Array | number[],
+	ttlSeconds: number,
+	options: DxEncodeWithTtlOptions = { compress: true },
+): string {
+	// 将输入转换为字节数组
+	let bytes: Uint8Array;
+	if (typeof input === "string") {
+		bytes = stringToBytes(input);
+	} else if (input instanceof Uint8Array) {
+		bytes = input;
+	} else if (Array.isArray(input)) {
+		bytes = new Uint8Array(input);
+	} else {
+		throw new DxEncodingError("输入必须是字符串、Uint8Array 或数字数组");
+	}
+
+	// 获取当前时间戳
+	const createdAt = Math.floor(Date.now() / 1000);
+
+	// 计算原始数据的 CRC16
+	const checksum = crc16(bytes);
+
+	// 决定是否压缩
+	let flags = FLAG_HAS_TTL;
+	let payload = bytes;
+
+	if (options.compress !== false && bytes.length >= COMPRESSION_THRESHOLD) {
+		try {
+			const compressed = compressDeflate(bytes);
+			if (compressed.length + 2 < bytes.length && bytes.length <= 65535) {
+				flags |= FLAG_COMPRESSED | FLAG_ALGO_DEFLATE;
+				const newPayload = new Uint8Array(2 + compressed.length);
+				newPayload[0] = (bytes.length >> 8) & 0xff;
+				newPayload[1] = bytes.length & 0xff;
+				newPayload.set(compressed, 2);
+				payload = newPayload;
+			}
+		} catch {
+			// 压缩失败，使用原始数据
+		}
+	}
+
+	// 构建完整数据：[flags(1)] [CRC16(2)] [created_at(4)] [ttl(4)] [payload]
+	const combined = new Uint8Array(
+		HEADER_SIZE + TTL_HEADER_SIZE + payload.length,
+	);
+	combined[0] = flags;
+	combined[1] = (checksum >> 8) & 0xff;
+	combined[2] = checksum & 0xff;
+	// created_at (大端序)
+	combined[3] = (createdAt >> 24) & 0xff;
+	combined[4] = (createdAt >> 16) & 0xff;
+	combined[5] = (createdAt >> 8) & 0xff;
+	combined[6] = createdAt & 0xff;
+	// ttl_seconds (大端序)
+	combined[7] = (ttlSeconds >> 24) & 0xff;
+	combined[8] = (ttlSeconds >> 16) & 0xff;
+	combined[9] = (ttlSeconds >> 8) & 0xff;
+	combined[10] = ttlSeconds & 0xff;
+	combined.set(payload, HEADER_SIZE + TTL_HEADER_SIZE);
+
+	return PREFIX + encodeRaw(combined);
+}
+
+/**
  * DX 编码信息
  */
 export interface DxInfo {
@@ -746,6 +978,12 @@ export default {
 	info: getDxInfo,
 	encodeFile: dxEncodeFile,
 	decodeToBlob: dxDecodeToBlob,
+	// TTL 相关
+	hasTtl,
+	getTtlInfo,
+	isExpired,
+	encodeWithTtl: dxEncodeWithTtl,
+	// 常量和工具
 	crc16,
 	DX_CHARSET,
 	PREFIX,

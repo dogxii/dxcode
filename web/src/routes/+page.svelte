@@ -4,7 +4,11 @@
     dxDecode,
     isDxEncoded,
     getDxInfo,
+    dxEncodeWithTtl,
+    getTtlInfo,
+    hasTtl,
     type DxInfo,
+    type TtlInfo,
   } from '$lib/dxcode'
   import { fade, slide } from 'svelte/transition'
 
@@ -13,13 +17,19 @@
   let dxText = $state('')
   let error = $state('')
 
+  // TTL 相关状态
+  let enableTtl = $state(false)
+  let ttlValue = $state(3600) // 默认 1 小时
+  let ttlUnit = $state<'seconds' | 'minutes' | 'hours' | 'days'>('hours')
+  let decodedTtlInfo = $state<TtlInfo | null>(null)
+
   // 复制状态
   let copiedPlain = $state(false)
   let copiedDx = $state(false)
   let copiedCli = $state(false)
 
   // 正在编辑的一侧，防止循环更新
-  let activeSide: 'plain' | 'dx' | null = null
+  let activeSide = $state<'plain' | 'dx' | null>(null)
 
   // 编码信息
   const info: DxInfo = getDxInfo()
@@ -31,11 +41,40 @@
   let activeSdkTab = $state('javascript')
   let copiedSdk = $state(false)
 
+  // TTL 单位转换
+  function getTtlSeconds(): number {
+    switch (ttlUnit) {
+      case 'seconds':
+        return ttlValue
+      case 'minutes':
+        return ttlValue * 60
+      case 'hours':
+        return ttlValue * 3600
+      case 'days':
+        return ttlValue * 86400
+    }
+  }
+
+  // 格式化时间戳
+  function formatTimestamp(ts: number): string {
+    return new Date(ts * 1000).toLocaleString()
+  }
+
+  // 格式化剩余时间
+  function formatTtl(seconds: number): string {
+    if (seconds <= 0) return '已过期'
+    if (seconds < 60) return `${seconds} 秒`
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟`
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时`
+    return `${Math.floor(seconds / 86400)} 天`
+  }
+
   // 处理文本输入
   function handlePlainInput(e: Event) {
     const target = e.target as HTMLTextAreaElement
     plainText = target.value
     activeSide = 'plain'
+    decodedTtlInfo = null
 
     if (!plainText) {
       dxText = ''
@@ -44,7 +83,11 @@
     }
 
     try {
-      dxText = dxEncode(plainText)
+      if (enableTtl) {
+        dxText = dxEncodeWithTtl(plainText, getTtlSeconds())
+      } else {
+        dxText = dxEncode(plainText)
+      }
       error = ''
     } catch (e) {
       error = e instanceof Error ? e.message : '编码错误'
@@ -56,6 +99,7 @@
     const target = e.target as HTMLTextAreaElement
     dxText = target.value.trim()
     activeSide = 'dx'
+    decodedTtlInfo = null
 
     if (!dxText) {
       plainText = ''
@@ -65,7 +109,14 @@
 
     try {
       if (isDxEncoded(dxText)) {
-        plainText = dxDecode(dxText, { asString: true }) as string
+        // 检查 TTL 信息
+        if (hasTtl(dxText)) {
+          decodedTtlInfo = getTtlInfo(dxText)
+        }
+        plainText = dxDecode(dxText, {
+          asString: true,
+          checkTtl: false,
+        }) as string
         error = ''
       } else {
         // 如果不是有效的 DX 编码，暂时清空明文或保持原样
@@ -109,6 +160,23 @@
     dxText = ''
     error = ''
     activeSide = null
+    decodedTtlInfo = null
+  }
+
+  // TTL 开关变化时重新编码
+  function handleTtlToggle() {
+    if (plainText && activeSide === 'plain') {
+      try {
+        if (enableTtl) {
+          dxText = dxEncodeWithTtl(plainText, getTtlSeconds())
+        } else {
+          dxText = dxEncode(plainText)
+        }
+        error = ''
+      } catch (e) {
+        error = e instanceof Error ? e.message : '编码错误'
+      }
+    }
   }
 </script>
 
@@ -197,6 +265,41 @@
               </span>
             </div>
             <div class="toolbar-right">
+              <!-- TTL 选项 -->
+              <div class="ttl-options">
+                <label class="ttl-toggle">
+                  <input
+                    type="checkbox"
+                    bind:checked={enableTtl}
+                    onchange={handleTtlToggle}
+                  />
+                  <span class="ttl-label">TTL</span>
+                </label>
+                {#if enableTtl}
+                  <div
+                    class="ttl-input-group"
+                    transition:slide={{ duration: 150 }}
+                  >
+                    <input
+                      type="number"
+                      class="ttl-input"
+                      bind:value={ttlValue}
+                      min="1"
+                      onchange={handleTtlToggle}
+                    />
+                    <select
+                      class="ttl-select"
+                      bind:value={ttlUnit}
+                      onchange={handleTtlToggle}
+                    >
+                      <option value="seconds">秒</option>
+                      <option value="minutes">分钟</option>
+                      <option value="hours">小时</option>
+                      <option value="days">天</option>
+                    </select>
+                  </div>
+                {/if}
+              </div>
               <button
                 class="btn btn-ghost btn-sm"
                 onclick={clear}
@@ -306,6 +409,25 @@
               <div class="pane-header">
                 <label for="dx-input" class="pane-title">DX Encoded</label>
                 <div class="pane-actions">
+                  {#if decodedTtlInfo}
+                    <span
+                      class="ttl-badge"
+                      class:expired={decodedTtlInfo.isExpired}
+                      transition:fade
+                      title={`创建时间: ${formatTimestamp(decodedTtlInfo.createdAt)}${decodedTtlInfo.expiresAt ? `\n过期时间: ${formatTimestamp(decodedTtlInfo.expiresAt)}` : '\n永不过期'}`}
+                    >
+                      {#if decodedTtlInfo.isExpired}
+                        ⏰ 已过期
+                      {:else if decodedTtlInfo.ttlSeconds === 0}
+                        ⏰ 永不过期
+                      {:else}
+                        ⏰ {formatTtl(
+                          decodedTtlInfo.expiresAt! -
+                            Math.floor(Date.now() / 1000),
+                        )}
+                      {/if}
+                    </span>
+                  {/if}
                   {#if error}
                     <span class="error-badge" transition:fade>{error}</span>
                   {/if}
@@ -434,6 +556,26 @@
             </div>
             <h3>易于识别</h3>
             <p>强制性的 <code>dx</code> 前缀，URL 安全字符集，一目了然。</p>
+          </div>
+          <div class="feature-card card">
+            <div class="feature-icon">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><circle cx="12" cy="12" r="10" /><polyline
+                  points="12 6 12 12 16 14"
+                /></svg
+              >
+            </div>
+            <h3>TTL 过期</h3>
+            <p>内置时间戳与过期时间支持，适用于临时令牌、验证码等场景。</p>
           </div>
           <div class="feature-card card">
             <div class="feature-icon">
@@ -1175,6 +1317,88 @@ fn main() {
     text-align: center;
   }
 
+  /* TTL Options */
+  .ttl-options {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-right: var(--spacing-md);
+  }
+
+  .ttl-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+  }
+
+  .ttl-toggle input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+  }
+
+  .ttl-label {
+    font-weight: 500;
+  }
+
+  .ttl-input-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .ttl-input {
+    width: 60px;
+    padding: 4px 8px;
+    font-size: 0.85rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text);
+  }
+
+  .ttl-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+  }
+
+  .ttl-select {
+    padding: 4px 8px;
+    font-size: 0.85rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+
+  .ttl-select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+  }
+
+  .ttl-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm);
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    white-space: nowrap;
+  }
+
+  .ttl-badge.expired {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+  }
+
   /* Footer */
   .footer {
     padding: var(--spacing-xl) 0;
@@ -1225,6 +1449,16 @@ fn main() {
 
     .features-grid {
       grid-template-columns: 1fr;
+    }
+
+    .ttl-options {
+      flex-wrap: wrap;
+      margin-right: var(--spacing-sm);
+    }
+
+    .ttl-input-group {
+      width: 100%;
+      margin-top: var(--spacing-xs);
     }
 
     .cli-tabs {
