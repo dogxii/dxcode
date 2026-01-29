@@ -136,6 +136,7 @@
 
     try {
       await navigator.clipboard.writeText(text)
+      showToast('Copied to clipboard')
       if (type === 'plain') {
         copiedPlain = true
         setTimeout(() => (copiedPlain = false), 2000)
@@ -151,6 +152,7 @@
       }
     } catch {
       error = '复制失败'
+      showToast('Copy failed')
     }
   }
 
@@ -161,6 +163,17 @@
     error = ''
     activeSide = null
     decodedTtlInfo = null
+  }
+
+  let toastMessage = ''
+  let toastTimer: ReturnType<typeof setTimeout>
+
+  function showToast(msg: string) {
+    toastMessage = msg
+    if (toastTimer) clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => {
+      toastMessage = ''
+    }, 3000)
   }
 
   // TTL 开关变化时重新编码
@@ -267,34 +280,40 @@
             <div class="toolbar-right">
               <!-- TTL 选项 -->
               <div class="ttl-options">
-                <label class="ttl-toggle">
+                <label class="ttl-toggle-wrapper" title="Enable Time-To-Live">
                   <input
                     type="checkbox"
                     bind:checked={enableTtl}
                     onchange={handleTtlToggle}
+                    class="sr-only"
                   />
-                  <span class="ttl-label">TTL</span>
+                  <div class="toggle-track">
+                    <div class="toggle-thumb"></div>
+                  </div>
+                  <span class="ttl-label-text">TTL</span>
                 </label>
+
                 <div class="ttl-input-group" class:ttl-hidden={!enableTtl}>
                   <input
                     type="number"
                     class="ttl-input"
                     bind:value={ttlValue}
                     min="1"
-                    onchange={handleTtlToggle}
-                    disabled={!enableTtl}
+                    placeholder="0"
+                    oninput={handleTtlToggle}
                   />
-                  <select
-                    class="ttl-select"
-                    bind:value={ttlUnit}
-                    onchange={handleTtlToggle}
-                    disabled={!enableTtl}
-                  >
-                    <option value="seconds">秒</option>
-                    <option value="minutes">分钟</option>
-                    <option value="hours">小时</option>
-                    <option value="days">天</option>
-                  </select>
+                  <div class="ttl-unit-wrapper">
+                    <select
+                      class="ttl-select"
+                      bind:value={ttlUnit}
+                      onchange={handleTtlToggle}
+                    >
+                      <option value="seconds">s</option>
+                      <option value="minutes">m</option>
+                      <option value="hours">h</option>
+                      <option value="days">d</option>
+                    </select>
+                  </div>
                 </div>
               </div>
               <button
@@ -327,13 +346,14 @@
             <div class="editor-pane plain-pane">
               <div class="pane-header">
                 <label for="plain-input" class="pane-title">Plain Text</label>
-                <button
-                  class="copy-btn-icon"
-                  onclick={() => copyText(plainText, 'plain')}
-                  title="复制明文"
-                  disabled={!plainText}
-                >
-                  {#if copiedPlain}
+                <div class="pane-actions">
+                  <button
+                    class="btn btn-ghost btn-sm copy-btn-icon"
+                    onclick={clear}
+                    disabled={!plainText && !dxText}
+                    aria-label="Clear text"
+                    title="Clear"
+                  >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       width="14"
@@ -344,36 +364,61 @@
                       stroke-width="2"
                       stroke-linecap="round"
                       stroke-linejoin="round"
-                      class="text-success"><path d="M20 6 9 17l-5-5" /></svg
                     >
-                  {:else}
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      ><rect
+                      <path d="M18 6 6 18" />
+                      <path d="m6 6 12 12" />
+                    </svg>
+                  </button>
+                  <div class="action-divider"></div>
+                  <button
+                    class="copy-btn-icon"
+                    onclick={() => copyText(plainText, 'plain')}
+                    title="复制明文"
+                    disabled={!plainText}
+                  >
+                    {#if copiedPlain}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
                         width="14"
                         height="14"
-                        x="8"
-                        y="8"
-                        rx="2"
-                        ry="2"
-                      /><path
-                        d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
-                      /></svg
-                    >
-                  {/if}
-                </button>
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        class="text-success"><path d="M20 6 9 17l-5-5" /></svg
+                      >
+                    {:else}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><rect
+                          width="14"
+                          height="14"
+                          x="8"
+                          y="8"
+                          rx="2"
+                          ry="2"
+                        /><path
+                          d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+                        /></svg
+                      >
+                    {/if}
+                  </button>
+                </div>
               </div>
               <textarea
                 id="plain-input"
                 class="editor-textarea"
+                class:input-error={!!error && activeSide === 'plain'}
                 placeholder="在此输入文本..."
                 value={plainText}
                 oninput={handlePlainInput}
@@ -476,6 +521,7 @@
               <textarea
                 id="dx-input"
                 class="editor-textarea font-mono"
+                class:input-error={!!error && activeSide === 'dx'}
                 placeholder="在此输入 DX 编码..."
                 value={dxText}
                 oninput={handleDxInput}
@@ -925,6 +971,14 @@ fn main() {
       </div>
     </div>
   </footer>
+
+  {#if toastMessage}
+    <div class="toast-container" transition:fade>
+      <div class="toast">
+        {toastMessage}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -1139,6 +1193,14 @@ fn main() {
     background: rgba(255, 255, 255, 0.02);
   }
 
+  .editor-textarea.input-error {
+    background: rgba(239, 68, 68, 0.05);
+  }
+
+  .editor-textarea.input-error::placeholder {
+    color: rgba(239, 68, 68, 0.5);
+  }
+
   .editor-divider {
     width: 1px;
     background: var(--color-border);
@@ -1150,6 +1212,7 @@ fn main() {
 
   .divider-arrow {
     position: absolute;
+    transform: rotate(90deg);
     width: 24px;
     height: 24px;
     border-radius: 50%;
@@ -1422,6 +1485,162 @@ fn main() {
   }
 
   /* Responsive */
+  .action-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--color-border);
+    margin: 0 4px;
+  }
+
+  /* Toast */
+  .toast-container {
+    position: fixed;
+    bottom: var(--spacing-xl);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    pointer-events: none;
+  }
+
+  .toast {
+    background: var(--color-bg-card);
+    color: var(--color-text);
+    padding: 0.75rem 1.5rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  /* New TTL Options Styles */
+  .ttl-options {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+  }
+
+  .ttl-toggle-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    cursor: pointer;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .toggle-track {
+    width: 36px;
+    height: 20px;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    position: relative;
+    transition: all var(--transition-fast);
+  }
+
+  .toggle-thumb {
+    width: 16px;
+    height: 16px;
+    background-color: var(--color-text-tertiary);
+    border-radius: 50%;
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    transition: all var(--transition-fast);
+  }
+
+  input:checked + .toggle-track {
+    background-color: var(--color-primary-dim);
+    border-color: var(--color-text);
+  }
+
+  input:checked + .toggle-track .toggle-thumb {
+    transform: translateX(16px);
+    background-color: var(--color-text);
+  }
+
+  .ttl-label-text {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text);
+  }
+
+  .ttl-input-group {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-secondary);
+    overflow: hidden;
+    transition: all var(--transition-normal);
+    opacity: 1;
+    width: auto;
+    transform: translateX(0);
+  }
+
+  .ttl-input-group.ttl-hidden {
+    opacity: 0;
+    width: 0;
+    margin: 0;
+    border: 0;
+    transform: translateX(-10px);
+    pointer-events: none;
+  }
+
+  .ttl-input {
+    width: 60px;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    text-align: right;
+    -moz-appearance: textfield;
+  }
+  .ttl-input::-webkit-outer-spin-button,
+  .ttl-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .ttl-input:focus {
+    box-shadow: none;
+    background: var(--color-bg-tertiary);
+  }
+
+  .ttl-unit-wrapper {
+    position: relative;
+    border-left: 1px solid var(--color-border);
+  }
+
+  .ttl-select {
+    border: none;
+    padding: 0.25rem 1.5rem 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  .ttl-select:hover {
+    color: var(--color-text);
+  }
+
+  .ttl-select:focus {
+    background: var(--color-bg-tertiary);
+  }
+
   @media (max-width: 768px) {
     .hero-title {
       font-size: 2.5rem;
@@ -1443,7 +1662,7 @@ fn main() {
     }
 
     .divider-arrow {
-      transform: rotate(90deg);
+      transform: rotate(0deg);
     }
 
     .editor-textarea {
