@@ -6,50 +6,98 @@
     getDxInfo,
     type DxInfo,
   } from '$lib/dxcode'
+  import { fade, slide } from 'svelte/transition'
 
   // 状态
-  let mode: 'encode' | 'decode' = $state('encode')
-  let input = $state('')
-  let output = $state('')
+  let plainText = $state('')
+  let dxText = $state('')
   let error = $state('')
-  let copied = $state(false)
+
+  // 复制状态
+  let copiedPlain = $state(false)
+  let copiedDx = $state(false)
+  let copiedCli = $state(false)
+
+  // 正在编辑的一侧，防止循环更新
+  let activeSide: 'plain' | 'dx' | null = null
 
   // 编码信息
   const info: DxInfo = getDxInfo()
 
-  // 处理编码/解码
-  function process() {
-    error = ''
-    output = ''
+  // CLI 标签页
+  let activeCliTab = $state('curl') // curl, homebrew, cargo, npm
 
-    if (!input.trim()) {
+  // SDK 标签页
+  let activeSdkTab = $state('javascript')
+  let copiedSdk = $state(false)
+
+  // 处理文本输入
+  function handlePlainInput(e: Event) {
+    const target = e.target as HTMLTextAreaElement
+    plainText = target.value
+    activeSide = 'plain'
+
+    if (!plainText) {
+      dxText = ''
+      error = ''
       return
     }
 
     try {
-      if (mode === 'encode') {
-        output = dxEncode(input)
-      } else {
-        if (!isDxEncoded(input.trim())) {
-          throw new Error('输入不是有效的 DX 编码格式')
-        }
-        output = dxDecode(input.trim(), { asString: true }) as string
-      }
+      dxText = dxEncode(plainText)
+      error = ''
     } catch (e) {
-      error = e instanceof Error ? e.message : '处理时发生错误'
+      error = e instanceof Error ? e.message : '编码错误'
     }
   }
 
-  // 复制到剪贴板
-  async function copyToClipboard() {
-    if (!output) return
+  // 处理 DX 输入
+  function handleDxInput(e: Event) {
+    const target = e.target as HTMLTextAreaElement
+    dxText = target.value.trim()
+    activeSide = 'dx'
+
+    if (!dxText) {
+      plainText = ''
+      error = ''
+      return
+    }
 
     try {
-      await navigator.clipboard.writeText(output)
-      copied = true
-      setTimeout(() => {
-        copied = false
-      }, 2000)
+      if (isDxEncoded(dxText)) {
+        plainText = dxDecode(dxText, { asString: true }) as string
+        error = ''
+      } else {
+        // 如果不是有效的 DX 编码，暂时清空明文或保持原样
+        // 这里选择保持原样但不报错，除非它是空的
+        if (dxText.startsWith('dx')) {
+          error = '无效的 DX 编码格式'
+        }
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : '解码错误'
+    }
+  }
+
+  // 复制功能
+  async function copyText(text: string, type: 'plain' | 'dx' | 'cli' | 'sdk') {
+    if (!text) return
+
+    try {
+      await navigator.clipboard.writeText(text)
+      if (type === 'plain') {
+        copiedPlain = true
+        setTimeout(() => (copiedPlain = false), 2000)
+      } else if (type === 'dx') {
+        copiedDx = true
+        setTimeout(() => (copiedDx = false), 2000)
+      } else if (type === 'cli') {
+        copiedCli = true
+        setTimeout(() => (copiedCli = false), 2000)
+      } else {
+        copiedSdk = true
+        setTimeout(() => (copiedSdk = false), 2000)
+      }
     } catch {
       error = '复制失败'
     }
@@ -57,41 +105,21 @@
 
   // 清空
   function clear() {
-    input = ''
-    output = ''
+    plainText = ''
+    dxText = ''
     error = ''
+    activeSide = null
   }
-
-  // 交换
-  function swap() {
-    if (output) {
-      input = output
-      output = ''
-      mode = mode === 'encode' ? 'decode' : 'encode'
-    }
-  }
-
-  // 输入变化时自动处理
-  $effect(() => {
-    if (input) {
-      process()
-    } else {
-      output = ''
-      error = ''
-    }
-  })
 </script>
 
 <svelte:head>
-  <title>DX Encoding | dxc.dogxi.me</title>
-  <meta name="description" content="DX 编码 - 带有 `dx` 前缀的自定义编码算法" />
+  <title>dxcode | 带有 `dx` 前缀的自定义编码算法</title>
+  <meta name="description" content="DX 编码 - 由 Dogxi 创造的独特编码算法" />
 </svelte:head>
 
-<!-- 网格背景 -->
 <div class="grid-bg"></div>
 
 <div class="page">
-  <!-- Header -->
   <header class="header">
     <div class="container header-inner">
       <a href="/" class="logo">
@@ -104,180 +132,76 @@
         <a
           href="https://github.com/dogxii/dxcode"
           target="_blank"
-          rel="noopener"
+          rel="noopener noreferrer"
           class="nav-link"
         >
+          GitHub
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
+            width="16"
+            height="16"
             viewBox="0 0 24 24"
-            fill="currentColor"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
           >
             <path
-              d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+              d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"
             />
+            <path d="M9 18c-4.51 2-5-2-7-2" />
           </svg>
-          GitHub
         </a>
       </nav>
     </div>
   </header>
 
-  <!-- Hero -->
-  <section class="hero">
-    <div class="container">
-      <div class="badge badge-primary">
-        <span class="badge-dot"></span>
-        v{info.version}
+  <main>
+    <section class="hero">
+      <div class="container text-center">
+        <div class="badge badge-primary mb-md">
+          <span class="badge-dot"></span>
+          <span>v{info.version} 现已发布</span>
+        </div>
+
+        <h1 class="hero-title">
+          <span class="hero-dx">DX</span> Encoding
+        </h1>
+
+        <p class="hero-desc">
+          一种独特的二进制文本编码方案。
+          <br />
+          <span class="text-secondary"
+            >带有标志性的 <code>dx</code> 前缀，URL 安全，专为开发者设计。</span
+          >
+        </p>
       </div>
+    </section>
 
-      <h1 class="hero-title">
-        <span class="hero-dx">DX</span> Encoding
-      </h1>
-
-      <p class="hero-desc">一个带有 `dx` 前缀的独特的二进制编码器</p>
-
-      <div class="hero-features">
-        <div class="feature-tag">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            ><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" /><path
-              d="m9 12 2 2 4-4"
-            /></svg
-          >
-          URL 安全
-        </div>
-        <div class="feature-tag">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            ><polyline points="16 18 22 12 16 6" /><polyline
-              points="8 6 2 12 8 18"
-            /></svg
-          >
-          完全可逆
-        </div>
-        <div class="feature-tag">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            ><path
-              d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
-            /></svg
-          >
-          多语言支持
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Encoder -->
-  <section class="encoder-section">
-    <div class="container">
-      <div class="encoder-card card">
-        <!-- Mode Switch -->
-        <div class="encoder-header">
-          <div class="mode-switch">
-            <button
-              class="mode-btn"
-              class:active={mode === 'encode'}
-              onclick={() => (mode = 'encode')}
-            >
-              编码
-            </button>
-            <button
-              class="mode-btn"
-              class:active={mode === 'decode'}
-              onclick={() => (mode = 'decode')}
-            >
-              解码
-            </button>
-          </div>
-
-          <div class="encoder-actions">
-            <button
-              class="btn btn-ghost"
-              onclick={swap}
-              disabled={!output}
-              title="交换"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" />
-              </svg>
-            </button>
-            <button class="btn btn-ghost" onclick={clear} title="清空">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M3 6h18" /><path
-                  d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
-                /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div class="encoder-body">
-          <!-- Input -->
-          <div class="encoder-panel">
-            <div class="panel-label">
-              {mode === 'encode' ? '输入文本' : '输入 DX 编码'}
+    <!-- 双栏编辑器 -->
+    <section class="encoder-section" id="editor">
+      <div class="container">
+        <div class="editor-container card">
+          <!-- 工具栏 -->
+          <div class="editor-toolbar">
+            <div class="toolbar-left">
+              <span class="status-indicator" class:active={activeSide !== null}>
+                {#if activeSide === 'plain'}
+                  正在编码...
+                {:else if activeSide === 'dx'}
+                  正在解码...
+                {:else}
+                  就绪
+                {/if}
+              </span>
             </div>
-            <textarea
-              class="encoder-textarea"
-              bind:value={input}
-              placeholder={mode === 'encode'
-                ? '输入要编码的内容...'
-                : '输入以 dx 开头的编码...'}
-              spellcheck="false"
-            ></textarea>
-          </div>
-
-          <div class="encoder-divider">
-            <div class="divider-line"></div>
-            <div class="divider-icon">
-              {#if mode === 'encode'}
+            <div class="toolbar-right">
+              <button
+                class="btn btn-ghost btn-sm"
+                onclick={clear}
+                title="清空所有内容"
+              >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width="16"
@@ -289,39 +213,27 @@
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 >
-                  <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+                  <path d="M3 6h18" /><path
+                    d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
+                  /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
                 </svg>
-              {:else}
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M19 12H5" /><path d="m12 19-7-7 7-7" />
-                </svg>
-              {/if}
+                清空
+              </button>
             </div>
-            <div class="divider-line"></div>
           </div>
 
-          <!-- Output -->
-          <div class="encoder-panel">
-            <div class="panel-header-row">
-              <div class="panel-label">
-                {mode === 'encode' ? 'DX 编码结果' : '解码结果'}
-              </div>
-              {#if output}
+          <div class="editor-panes">
+            <!-- 左侧：明文 -->
+            <div class="editor-pane plain-pane">
+              <div class="pane-header">
+                <label for="plain-input" class="pane-title">Plain Text</label>
                 <button
-                  class="btn btn-ghost copy-btn"
-                  onclick={copyToClipboard}
+                  class="copy-btn-icon"
+                  onclick={() => copyText(plainText, 'plain')}
+                  title="复制明文"
+                  disabled={!plainText}
                 >
-                  {#if copied}
+                  {#if copiedPlain}
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       width="14"
@@ -332,10 +244,8 @@
                       stroke-width="2"
                       stroke-linecap="round"
                       stroke-linejoin="round"
+                      class="text-success"><path d="M20 6 9 17l-5-5" /></svg
                     >
-                      <path d="M20 6 9 17l-5-5" />
-                    </svg>
-                    已复制
                   {:else}
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -347,8 +257,7 @@
                       stroke-width="2"
                       stroke-linecap="round"
                       stroke-linejoin="round"
-                    >
-                      <rect
+                      ><rect
                         width="14"
                         height="14"
                         x="8"
@@ -357,317 +266,537 @@
                         ry="2"
                       /><path
                         d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
-                      />
-                    </svg>
-                    复制
+                      /></svg
+                    >
                   {/if}
                 </button>
-              {/if}
+              </div>
+              <textarea
+                id="plain-input"
+                class="editor-textarea"
+                placeholder="在此输入文本..."
+                value={plainText}
+                oninput={handlePlainInput}
+                spellcheck="false"
+              ></textarea>
             </div>
-            <div class="encoder-output" class:has-error={!!error}>
-              {#if error}
-                <span class="error-text">{error}</span>
-              {:else if output}
-                <code>{output}</code>
-              {:else}
-                <span class="placeholder">结果将显示在这里...</span>
-              {/if}
+
+            <!-- 中间：分隔/箭头 -->
+            <div class="editor-divider">
+              <div class="divider-arrow">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M7 16V4M7 4L3 8M7 4L11 8" />
+                  <path d="M17 8v12M17 20l4-4M17 20l-4-4" />
+                </svg>
+              </div>
+            </div>
+
+            <!-- 右侧：DX 编码 -->
+            <div class="editor-pane dx-pane">
+              <div class="pane-header">
+                <label for="dx-input" class="pane-title">DX Encoded</label>
+                <div class="pane-actions">
+                  {#if error}
+                    <span class="error-badge" transition:fade>{error}</span>
+                  {/if}
+                  <button
+                    class="copy-btn-icon"
+                    onclick={() => copyText(dxText, 'dx')}
+                    title="复制编码"
+                    disabled={!dxText}
+                  >
+                    {#if copiedDx}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        class="text-success"><path d="M20 6 9 17l-5-5" /></svg
+                      >
+                    {:else}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><rect
+                          width="14"
+                          height="14"
+                          x="8"
+                          y="8"
+                          rx="2"
+                          ry="2"
+                        /><path
+                          d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+                        /></svg
+                      >
+                    {/if}
+                  </button>
+                </div>
+              </div>
+              <textarea
+                id="dx-input"
+                class="editor-textarea font-mono"
+                placeholder="在此输入 DX 编码..."
+                value={dxText}
+                oninput={handleDxInput}
+                spellcheck="false"
+              ></textarea>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Features -->
-  <section class="features-section">
-    <div class="container">
-      <h2 class="section-title">为什么选择 DX 编码?</h2>
-
-      <div class="features-grid">
-        <div class="feature-card card">
-          <div class="feature-icon">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-            </svg>
-          </div>
-          <h3>独特算法</h3>
-          <p>使用自定义 64 字符集和 XOR 变换，与标准 Base64 完全不同</p>
-        </div>
-
-        <div class="feature-card card">
-          <div class="feature-icon">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M20 7h-3a2 2 0 0 1-2-2V2" /><path
-                d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"
-              /><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8" />
-            </svg>
-          </div>
-          <h3>易于识别</h3>
-          <p>所有编码结果以 <code>dx</code> 为前缀，一眼即可识别</p>
-        </div>
-
-        <div class="feature-card card">
-          <div class="feature-icon">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path
-                d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
-              /><path d="M3 3v5h5" /><path
-                d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"
-              /><path d="M16 16h5v5" />
-            </svg>
-          </div>
-          <h3>完全可逆</h3>
-          <p>无损编码，支持任意文本和二进制数据</p>
-        </div>
-
-        <div class="feature-card card">
-          <div class="feature-icon">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <ellipse cx="12" cy="5" rx="9" ry="3" /><path
-                d="M3 5V19A9 3 0 0 0 21 19V5"
-              /><path d="M3 12A9 3 0 0 0 21 12" />
-            </svg>
-          </div>
-          <h3>多语言支持</h3>
-          <p>提供 JavaScript、Python、Go、Rust、C 等多种语言实现</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Spec -->
-  <section class="spec-section">
-    <div class="container">
-      <h2 class="section-title">技术规格</h2>
-
-      <div class="spec-card card">
-        <div class="spec-grid">
-          <div class="spec-item">
-            <span class="spec-label">字符集</span>
-            <code class="spec-value mono">{info.charset}</code>
-          </div>
-          <div class="spec-row">
-            <div class="spec-item">
-              <span class="spec-label">前缀</span>
-              <code class="spec-value">{info.prefix}</code>
-            </div>
-            <div class="spec-item">
-              <span class="spec-label">魔数</span>
-              <code class="spec-value"
-                >0x{info.magic.toString(16).toUpperCase()} ('{String.fromCharCode(
-                  info.magic,
-                )}')</code
+    <!-- 特性介绍 -->
+    <section class="features-section">
+      <div class="container">
+        <div class="features-grid">
+          <div class="feature-card card">
+            <div class="feature-icon">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" /></svg
               >
             </div>
-            <div class="spec-item">
-              <span class="spec-label">填充</span>
-              <code class="spec-value">{info.padding}</code>
+            <h3>URL 安全</h3>
+            <p>使用自定义字符集，原生支持 URL 传输，无需额外的转义处理。</p>
+          </div>
+          <div class="feature-card card">
+            <div class="feature-icon">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><polyline points="16 18 22 12 16 6" /><polyline
+                  points="8 6 2 12 8 18"
+                /></svg
+              >
             </div>
+            <h3>易于识别</h3>
+            <p>强制性的 <code>dx</code> 前缀，让编码数据一目了然，不再混淆。</p>
+          </div>
+          <div class="feature-card card">
+            <div class="feature-icon">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path
+                  d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+                /></svg
+              >
+            </div>
+            <h3>高性能</h3>
+            <p>Rust 核心实现，即时编解码，零依赖，极低的资源占用。</p>
           </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- CLI Section -->
-  <section class="cli-section">
-    <div class="container">
-      <h2 class="section-title">命令行工具</h2>
-
-      <div class="cli-card card">
-        <div class="cli-header">
-          <div class="cli-title">
-            <span class="cli-name">dxc</span>
-            <span class="cli-badge">CLI</span>
-          </div>
+    <!-- CLI 安装部分 -->
+    <section class="cli-section">
+      <div class="container">
+        <div class="section-header text-center mb-lg">
+          <h2 class="section-title">命令行工具</h2>
+          <p class="section-subtitle text-secondary">
+            在终端中使用 dxcode，支持所有主流操作系统。
+          </p>
         </div>
 
-        <!-- Install Methods -->
-        <div class="install-methods">
-          <div class="install-method">
-            <span class="install-label">npm</span>
-            <code class="install-cmd">npm i -g dxcode-cli</code>
-          </div>
-          <div class="install-method">
-            <span class="install-label">curl</span>
-            <code class="install-cmd"
-              >curl -fsSL https://cdn.dogxi.me/dxcode_install.sh | sh</code
+        <div class="cli-card card">
+          <div class="cli-tabs">
+            <button
+              class="cli-tab"
+              class:active={activeCliTab === 'curl'}
+              onclick={() => (activeCliTab = 'curl')}
             >
+              Curl (Universal)
+            </button>
+            <button
+              class="cli-tab"
+              class:active={activeCliTab === 'homebrew'}
+              onclick={() => (activeCliTab = 'homebrew')}
+            >
+              Homebrew
+            </button>
+            <button
+              class="cli-tab"
+              class:active={activeCliTab === 'cargo'}
+              onclick={() => (activeCliTab = 'cargo')}
+            >
+              Cargo
+            </button>
           </div>
-          <div class="install-method">
-            <span class="install-label">brew</span>
-            <code class="install-cmd">brew install dogxi/tap/dxcode-cli</code>
-          </div>
-        </div>
 
-        <div class="cli-examples">
-          <div class="cli-example">
-            <span class="cli-comment"># 编码</span>
-            <code>dxc encode "Hello World"</code>
+          <div class="cli-content">
+            {#if activeCliTab === 'curl'}
+              <div class="cli-panel" in:fade>
+                <div class="code-block">
+                  <code
+                    >curl -fsSL https://cdn.dogxi.me/dxcode_install.sh | sh</code
+                  >
+                  <button
+                    class="copy-btn"
+                    onclick={() =>
+                      copyText(
+                        'curl -fsSL https://cdn.dogxi.me/dxcode_install.sh | sh',
+                        'cli',
+                      )}
+                  >
+                    {#if copiedCli}
+                      已复制
+                    {:else}
+                      复制
+                    {/if}
+                  </button>
+                </div>
+                <p class="cli-hint">自动检测系统并下载预编译二进制文件。</p>
+              </div>
+            {:else if activeCliTab === 'homebrew'}
+              <div class="cli-panel" in:fade>
+                <div class="code-block">
+                  <code>brew install dogxii/tap/dxcode</code>
+                  <button
+                    class="copy-btn"
+                    onclick={() =>
+                      copyText('brew install dogxii/tap/dxcode', 'cli')}
+                  >
+                    {#if copiedCli}
+                      已复制
+                    {:else}
+                      复制
+                    {/if}
+                  </button>
+                </div>
+                <p class="cli-hint">适用于 macOS 和 Linux。</p>
+              </div>
+            {:else if activeCliTab === 'cargo'}
+              <div class="cli-panel" in:fade>
+                <div class="code-block">
+                  <code>cargo install dxcode</code>
+                  <button
+                    class="copy-btn"
+                    onclick={() => copyText('cargo install dxcode', 'cli')}
+                  >
+                    {#if copiedCli}
+                      已复制
+                    {:else}
+                      复制
+                    {/if}
+                  </button>
+                </div>
+                <p class="cli-hint">需要 Rust 环境。从源码编译安装。</p>
+              </div>
+            {/if}
           </div>
-          <div class="cli-example">
-            <span class="cli-comment"># 解码</span>
-            <code>dxc decode "dxQBpXRwZX..."</code>
-          </div>
-          <div class="cli-example">
-            <span class="cli-comment"># 自动检测（智能判断）</span>
-            <code>dxc "Hello World"</code>
-          </div>
-          <div class="cli-example">
-            <span class="cli-comment"># 文件操作</span>
-            <code>dxc -f input.txt -o output.dx</code>
-          </div>
-          <div class="cli-example">
-            <span class="cli-comment"># 管道</span>
-            <code>echo "Hello" | dxc</code>
-          </div>
-        </div>
-
-        <div class="cli-footer">
-          <span class="cli-hint">更多用法：<code>dxc -h</code></span>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Code Examples -->
-  <section class="code-section">
-    <div class="container">
-      <h2 class="section-title">快速开始</h2>
+    <!-- SDK 使用部分 -->
+    <section class="cli-section">
+      <div class="container">
+        <div class="section-header text-center mb-lg">
+          <h2 class="section-title">多语言 SDK</h2>
+          <p class="section-subtitle text-secondary">
+            在您的项目中集成 dxcode，支持多种主流编程语言。
+          </p>
+        </div>
 
-      <div class="code-grid">
-        <div class="code-card card">
-          <div class="code-header">
-            <span class="code-lang">JavaScript</span>
-            <code class="code-install">npm i dxcode-lib</code>
+        <div class="cli-card card">
+          <div class="cli-tabs">
+            <button
+              class="cli-tab"
+              class:active={activeSdkTab === 'javascript'}
+              onclick={() => (activeSdkTab = 'javascript')}
+            >
+              JavaScript
+            </button>
+            <button
+              class="cli-tab"
+              class:active={activeSdkTab === 'python'}
+              onclick={() => (activeSdkTab = 'python')}
+            >
+              Python
+            </button>
+            <button
+              class="cli-tab"
+              class:active={activeSdkTab === 'go'}
+              onclick={() => (activeSdkTab = 'go')}
+            >
+              Go
+            </button>
+            <button
+              class="cli-tab"
+              class:active={activeSdkTab === 'rust'}
+              onclick={() => (activeSdkTab = 'rust')}
+            >
+              Rust
+            </button>
           </div>
-          <pre><code
-              >{`import { dxEncode, dxDecode } from 'dxcode-lib'
 
-const encoded = dxEncode('Hello, Dogxi!')
-console.log(encoded)  // dx...
+          <div class="cli-content">
+            {#if activeSdkTab === 'javascript'}
+              <div class="cli-panel" in:fade>
+                <div class="code-block multiline">
+                  <pre><code
+                      >{`import { dxEncode, dxDecode } from 'dxcode-lib'
+
+const encoded = dxEncode('Hello World')
+console.log(encoded) // dx...
 
 const decoded = dxDecode(encoded)
-console.log(decoded)  // Hello, Dogxi!`}</code
-            ></pre>
-        </div>
+console.log(decoded) // Hello World`}</code
+                    ></pre>
+                  <button
+                    class="copy-btn"
+                    onclick={() =>
+                      copyText(
+                        `import { dxEncode, dxDecode } from 'dxcode-lib'
 
-        <div class="code-card card">
-          <div class="code-header">
-            <span class="code-lang">Python</span>
-            <code class="code-install">pip install dxcode</code>
-          </div>
-          <pre><code
-              >{`from dxcode import dx_encode, dx_decode
+const encoded = dxEncode('Hello World')
+console.log(encoded) // dx...
 
-encoded = dx_encode('Hello, Dogxi!')
-print(encoded)  # dx...
+const decoded = dxDecode(encoded)
+console.log(decoded) // Hello World`,
+                        'sdk',
+                      )}
+                  >
+                    {#if copiedSdk}
+                      已复制
+                    {:else}
+                      复制
+                    {/if}
+                  </button>
+                </div>
+                <p class="cli-hint">
+                  安装: <code>npm install dxcode-lib</code>
+                </p>
+              </div>
+            {:else if activeSdkTab === 'python'}
+              <div class="cli-panel" in:fade>
+                <div class="code-block multiline">
+                  <pre><code
+                      >{`from dxcode import dx_encode, dx_decode
+
+encoded = dx_encode('Hello World')
+print(encoded)
 
 decoded = dx_decode(encoded)
-print(decoded)  # Hello, Dogxi!`}</code
-            ></pre>
+print(decoded)`}</code
+                    ></pre>
+                  <button
+                    class="copy-btn"
+                    onclick={() =>
+                      copyText(
+                        `from dxcode import dx_encode, dx_decode
+
+encoded = dx_encode('Hello World')
+print(encoded)
+
+decoded = dx_decode(encoded)
+print(decoded)`,
+                        'sdk',
+                      )}
+                  >
+                    {#if copiedSdk}
+                      已复制
+                    {:else}
+                      复制
+                    {/if}
+                  </button>
+                </div>
+                <p class="cli-hint">安装: <code>pip install dxcode</code></p>
+              </div>
+            {:else if activeSdkTab === 'go'}
+              <div class="cli-panel" in:fade>
+                <div class="code-block multiline">
+                  <pre><code
+                      >{`package main
+
+import (
+    "fmt"
+    dx "github.com/dogxii/dxcode"
+)
+
+func main() {
+    encoded := dx.Encode([]byte("Hello World"))
+    fmt.Println(encoded)
+
+    decoded, _ := dx.Decode(encoded)
+    fmt.Println(string(decoded))
+}`}</code
+                    ></pre>
+                  <button
+                    class="copy-btn"
+                    onclick={() =>
+                      copyText(
+                        `package main
+
+import (
+    "fmt"
+    dx "github.com/dogxii/dxcode"
+)
+
+func main() {
+    encoded := dx.Encode([]byte("Hello World"))
+    fmt.Println(encoded)
+
+    decoded, _ := dx.Decode(encoded)
+    fmt.Println(string(decoded))
+}`,
+                        'sdk',
+                      )}
+                  >
+                    {#if copiedSdk}
+                      已复制
+                    {:else}
+                      复制
+                    {/if}
+                  </button>
+                </div>
+                <p class="cli-hint">
+                  安装: <code>go get github.com/dogxii/dxcode</code>
+                </p>
+              </div>
+            {:else if activeSdkTab === 'rust'}
+              <div class="cli-panel" in:fade>
+                <div class="code-block multiline">
+                  <pre><code
+                      >{`use dxcode::{encode, decode};
+
+fn main() {
+    let encoded = encode("Hello World".as_bytes());
+    println!("{}", encoded);
+
+    let decoded = decode(&encoded).unwrap();
+    println!("{}", String::from_utf8(decoded).unwrap());
+}`}</code
+                    ></pre>
+                  <button
+                    class="copy-btn"
+                    onclick={() =>
+                      copyText(
+                        `use dxcode::{encode, decode};
+
+fn main() {
+    let encoded = encode("Hello World".as_bytes());
+    println!("{}", encoded);
+
+    let decoded = decode(&encoded).unwrap();
+    println!("{}", String::from_utf8(decoded).unwrap());
+}`,
+                        'sdk',
+                      )}
+                  >
+                    {#if copiedSdk}
+                      已复制
+                    {:else}
+                      复制
+                    {/if}
+                  </button>
+                </div>
+                <p class="cli-hint">
+                  安装: 在 <code>Cargo.toml</code> 添加
+                  <code>dxcode = "1.0"</code>
+                </p>
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
+  </main>
 
-  <!-- Footer -->
   <footer class="footer">
     <div class="container footer-inner">
       <div class="footer-left">
-        <span class="footer-logo">dxcode</span>
-        <span class="footer-sep">·</span>
-        <span class="footer-author">by Dogxi</span>
+        <span class="footer-copy"
+          >© 2026 <a href="https://blog.dogxi.me">Dogxi</a>. MIT License.</span
+        >
       </div>
       <div class="footer-right">
-        <a
-          href="https://github.com/dogxii/dxcode"
-          target="_blank"
-          rel="noopener">GitHub</a
-        >
-        <span class="footer-sep">·</span>
-        <span>MIT License</span>
+        <a href="https://github.com/dogxii/dxcode" target="_blank">GitHub</a>
       </div>
     </div>
   </footer>
 </div>
 
 <style>
-  /* Page Layout */
+  /* 页面布局 */
   .page {
-    min-height: 100vh;
     display: flex;
     flex-direction: column;
+    min-height: 100vh;
+  }
+
+  main {
+    flex: 1;
   }
 
   /* Header */
   .header {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: color-mix(in srgb, var(--color-bg), transparent 20%);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--color-border);
+    padding: var(--spacing-md) 0;
+    /* backdrop-filter: blur(8px); */
   }
 
   .header-inner {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    height: 56px;
+    align-items: center;
   }
 
   .logo {
+    font-weight: 700;
+    font-size: 1.25rem;
     display: flex;
     align-items: baseline;
-    font-family: var(--font-mono);
-    font-size: 1rem;
-    font-weight: 600;
+    gap: 2px;
   }
 
   .logo-text {
-    color: var(--color-primary);
+    letter-spacing: -0.02em;
   }
 
   .logo-dot {
@@ -675,564 +804,369 @@ print(decoded)  # Hello, Dogxi!`}</code
   }
 
   .logo-domain {
-    color: var(--color-text);
-  }
-
-  .nav {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
+    color: var(--color-text-secondary);
+    font-size: 1rem;
+    font-weight: 500;
   }
 
   .nav-link {
     display: flex;
     align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-sm);
+    gap: var(--spacing-sm);
     font-size: 0.875rem;
     color: var(--color-text-secondary);
-    border-radius: var(--radius-md);
-    transition: all var(--transition-fast);
   }
 
   .nav-link:hover {
     color: var(--color-text);
-    background: var(--color-bg-tertiary);
   }
 
   /* Hero */
   .hero {
-    padding: var(--spacing-3xl) 0 var(--spacing-2xl);
-    text-align: center;
-  }
-
-  .hero .badge {
-    margin-bottom: var(--spacing-lg);
-  }
-
-  .badge-dot {
-    width: 6px;
-    height: 6px;
-    background: var(--color-primary);
-    border-radius: 50%;
-    animation: pulse 2s ease-in-out infinite;
+    padding: var(--spacing-3xl) 0;
   }
 
   .hero-title {
-    font-size: 3.5rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    margin-bottom: var(--spacing-md);
+    font-size: 4rem;
+    line-height: 1.1;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    margin-bottom: var(--spacing-lg);
+    background: linear-gradient(to bottom right, #fff 0%, #aaa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .hero-dx {
-    color: var(--color-primary);
+    font-family: var(--font-mono);
   }
 
   .hero-desc {
-    font-size: 1.125rem;
+    font-size: 1.25rem;
     color: var(--color-text-secondary);
-    margin-bottom: var(--spacing-xl);
-  }
-
-  .hero-desc a {
-    color: var(--color-text);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
-  .hero-desc a:hover {
-    color: var(--color-primary);
-  }
-
-  .hero-features {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: var(--spacing-sm);
-  }
-
-  .feature-tag {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-md);
-    font-size: 0.8125rem;
-    color: var(--color-text-secondary);
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: 9999px;
-  }
-
-  /* Encoder Section */
-  .encoder-section {
-    padding: var(--spacing-xl) 0 var(--spacing-3xl);
-  }
-
-  .encoder-card {
-    max-width: 800px;
+    max-width: 600px;
     margin: 0 auto;
   }
 
-  .encoder-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--spacing-md) var(--spacing-lg);
-    border-bottom: 1px solid var(--color-border);
+  /* Editor Section (Two-Pane) */
+  .encoder-section {
+    padding-bottom: var(--spacing-3xl);
   }
 
-  .mode-switch {
-    display: flex;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: 2px;
-  }
-
-  .mode-btn {
-    padding: var(--spacing-xs) var(--spacing-md);
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--color-text-secondary);
-    border-radius: calc(var(--radius-md) - 2px);
-    transition: all var(--transition-fast);
-  }
-
-  .mode-btn:hover {
-    color: var(--color-text);
-  }
-
-  .mode-btn.active {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text);
-  }
-
-  .encoder-actions {
-    display: flex;
-    gap: var(--spacing-xs);
-  }
-
-  .encoder-body {
-    padding: var(--spacing-lg);
-  }
-
-  .encoder-panel {
+  .editor-container {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-sm);
+    height: 500px;
+    overflow: hidden;
+    background: var(--color-bg-card);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   }
 
-  .panel-header-row {
+  .editor-toolbar {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--color-bg-tertiary);
+  }
+
+  .status-indicator {
+    font-size: 0.75rem;
+    color: var(--color-text-tertiary);
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 6px;
   }
 
-  .panel-label {
+  .status-indicator::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-text-tertiary);
+  }
+
+  .status-indicator.active {
+    color: var(--color-success);
+  }
+
+  .status-indicator.active::before {
+    background: var(--color-success);
+    box-shadow: 0 0 8px var(--color-success);
+  }
+
+  .editor-panes {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .editor-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0; /* 防止内容溢出 */
+  }
+
+  .pane-header {
+    padding: var(--spacing-sm) var(--spacing-md);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    /* border-bottom: 1px dashed var(--color-border); */
+  }
+
+  .pane-title {
     font-size: 0.75rem;
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--color-text-tertiary);
   }
 
-  .encoder-textarea {
-    width: 100%;
-    min-height: 120px;
-    padding: var(--spacing-md);
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
-    line-height: 1.6;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    resize: vertical;
-    transition: border-color var(--transition-fast);
-  }
-
-  .encoder-textarea:focus {
-    outline: none;
-    border-color: var(--color-border-hover);
-  }
-
-  .encoder-divider {
+  .pane-actions {
     display: flex;
     align-items: center;
-    gap: var(--spacing-md);
-    padding: var(--spacing-lg) 0;
+    gap: var(--spacing-sm);
   }
 
-  .divider-line {
+  .error-badge {
+    font-size: 0.75rem;
+    color: var(--color-error);
+    background: rgba(239, 68, 68, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .copy-btn-icon {
+    padding: 4px;
+    border-radius: 4px;
+    color: var(--color-text-tertiary);
+    transition: all 0.2s;
+  }
+
+  .copy-btn-icon:hover {
+    color: var(--color-text);
+    background: var(--color-bg-tertiary);
+  }
+
+  .copy-btn-icon:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .editor-textarea {
     flex: 1;
-    height: 1px;
-    background: var(--color-border);
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    resize: none;
+    padding: var(--spacing-md);
+    background: transparent;
+    line-height: 1.6;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
   }
 
-  .divider-icon {
+  .editor-textarea:focus {
+    border: none;
+    outline: none;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .editor-divider {
+    width: 1px;
+    background: var(--color-border);
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    color: var(--color-text-tertiary);
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
+  }
+
+  .divider-arrow {
+    position: absolute;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
-  }
-
-  .encoder-output {
-    min-height: 120px;
-    padding: var(--spacing-md);
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
-    line-height: 1.6;
-    background: var(--color-bg-secondary);
+    background: var(--color-bg);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    word-break: break-all;
-    overflow-wrap: break-word;
-  }
-
-  .encoder-output .placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: var(--color-text-tertiary);
+    z-index: 10;
   }
 
-  .encoder-output.has-error {
-    border-color: var(--color-error);
+  .text-success {
+    color: var(--color-success);
   }
 
-  .encoder-output .error-text {
-    color: var(--color-error);
-  }
-
-  .encoder-output code {
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--color-accent);
-  }
-
-  .copy-btn {
-    font-size: 0.75rem;
-    padding: var(--spacing-xs) var(--spacing-sm);
-  }
-
-  /* Features Section */
+  /* Features */
   .features-section {
     padding: var(--spacing-3xl) 0;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .section-title {
-    font-size: 1.5rem;
-    font-weight: 600;
-    text-align: center;
-    margin-bottom: var(--spacing-2xl);
+    /* border-top: 1px solid var(--color-border); */
   }
 
   .features-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: var(--spacing-lg);
   }
 
   .feature-card {
     padding: var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-md);
   }
 
   .feature-icon {
+    width: 48px;
+    height: 48px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
-    color: var(--color-primary);
-    background: var(--color-primary-dim);
-    border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--spacing-md);
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-lg);
+    color: var(--color-text);
   }
 
   .feature-card h3 {
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 600;
-    margin-bottom: var(--spacing-sm);
   }
 
   .feature-card p {
-    font-size: 0.875rem;
+    font-size: 0.9rem;
     color: var(--color-text-secondary);
-    line-height: 1.6;
   }
 
-  .feature-card code {
-    font-size: 0.8125rem;
-  }
-
-  /* Spec Section */
-  .spec-section {
-    padding: var(--spacing-3xl) 0;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .spec-card {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: var(--spacing-lg);
-  }
-
-  .spec-grid {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-lg);
-  }
-
-  .spec-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: var(--spacing-md);
-  }
-
-  .spec-item {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-xs);
-  }
-
-  .spec-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-text-tertiary);
-  }
-
-  .spec-value {
-    padding: var(--spacing-sm) var(--spacing-md);
-    font-size: 0.875rem;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-md);
-    border: none;
-  }
-
-  .spec-value.mono {
-    font-size: 0.75rem;
-    word-break: break-all;
-  }
-
-  /* Code Section */
-  .code-section {
-    padding: var(--spacing-3xl) 0;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .code-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-    gap: var(--spacing-lg);
-  }
-
-  .code-card {
-    overflow: hidden;
-  }
-
-  .code-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--spacing-sm) var(--spacing-md);
-    background: var(--color-bg-tertiary);
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .code-lang {
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-primary);
-  }
-
-  .code-install {
-    font-size: 0.75rem;
-    padding: 0.125rem 0.5rem;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-sm);
-  }
-
-  .code-card pre {
-    margin: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    padding: var(--spacing-md);
-  }
-
-  /* CLI Section */
+  /* CLI Section (Tabbed) */
   .cli-section {
-    padding: var(--spacing-xl) 0;
+    padding: var(--spacing-3xl) 0;
+    border-top: 1px solid var(--color-border);
   }
 
   .cli-card {
+    max-width: 800px;
+    margin: 0 auto;
     overflow: hidden;
   }
 
-  .cli-header {
+  .cli-tabs {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
     background: var(--color-bg-tertiary);
-    border-bottom: 1px solid var(--color-border);
-    flex-wrap: wrap;
-    gap: var(--spacing-sm);
   }
 
-  .install-methods {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    border-bottom: 1px solid var(--color-border);
+  .cli-tab {
+    flex: 1;
+    padding: var(--spacing-md);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
   }
 
-  .install-method {
+  .cli-tab:hover {
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .cli-tab.active {
+    color: var(--color-text);
+    border-bottom-color: var(--color-primary);
+    background: var(--color-bg-card);
+  }
+
+  .cli-content {
+    padding: var(--spacing-xl);
+  }
+
+  .code-block {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    padding: var(--spacing-sm) var(--spacing-md);
-    border-bottom: 1px solid var(--color-border);
+    background: #000;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
     gap: var(--spacing-md);
   }
 
-  .install-method:last-child {
-    border-bottom: none;
-  }
-
-  .install-label {
+  .code-block code {
     font-family: var(--font-mono);
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-text-tertiary);
-    min-width: 3rem;
-  }
-
-  .install-cmd {
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
     color: var(--color-text);
-    background: var(--color-bg-secondary);
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--color-border);
-    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 0.95rem;
+    word-break: break-all;
+  }
+
+  .code-block.multiline {
+    align-items: flex-start;
+  }
+
+  .code-block.multiline pre {
+    margin: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--color-text);
     overflow-x: auto;
-    white-space: nowrap;
   }
 
-  .cli-title {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-sm);
+  .code-block.multiline code {
+    word-break: normal;
+    white-space: pre;
   }
 
-  .cli-name {
-    font-family: var(--font-mono);
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--color-text);
-  }
-
-  .cli-badge {
-    font-size: 0.625rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 0.125rem 0.375rem;
-    background: var(--color-text);
-    color: var(--color-bg);
+  .copy-btn {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    transition: all 0.2s;
   }
 
-  .cli-examples {
-    padding: var(--spacing-md);
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-sm);
-  }
-
-  .cli-example {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .cli-example code {
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
+  .copy-btn:hover {
     color: var(--color-text);
-    padding-left: var(--spacing-sm);
-  }
-
-  .cli-comment {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--color-text-tertiary);
-  }
-
-  .cli-footer {
-    padding: var(--spacing-sm) var(--spacing-md);
-    border-top: 1px solid var(--color-border);
+    border-color: var(--color-text-secondary);
     background: var(--color-bg-tertiary);
   }
 
   .cli-hint {
-    font-size: 0.75rem;
+    margin-top: var(--spacing-md);
+    font-size: 0.9rem;
     color: var(--color-text-tertiary);
-  }
-
-  .cli-hint code {
-    color: var(--color-text-secondary);
+    text-align: center;
   }
 
   /* Footer */
   .footer {
-    margin-top: auto;
-    padding: var(--spacing-lg) 0;
+    padding: var(--spacing-xl) 0;
     border-top: 1px solid var(--color-border);
+    margin-top: auto;
   }
 
   .footer-inner {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    font-size: 0.8125rem;
+    align-items: center;
+    font-size: 0.875rem;
     color: var(--color-text-tertiary);
   }
 
-  .footer-left,
-  .footer-right {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-sm);
-  }
-
-  .footer-logo {
-    font-family: var(--font-mono);
-    color: var(--color-text-secondary);
-  }
-
-  .footer-sep {
-    opacity: 0.5;
-  }
-
-  .footer a {
-    color: var(--color-text-secondary);
-  }
-
-  .footer a:hover {
-    color: var(--color-text);
+  .footer-right a:hover {
+    text-decoration: underline;
   }
 
   /* Responsive */
@@ -1241,39 +1175,45 @@ print(decoded)  # Hello, Dogxi!`}</code
       font-size: 2.5rem;
     }
 
-    .encoder-header {
+    .editor-container {
+      height: auto;
+      min-height: 600px;
+    }
+
+    .editor-panes {
       flex-direction: column;
-      gap: var(--spacing-md);
-      align-items: stretch;
     }
 
-    .mode-switch {
-      justify-content: center;
+    .editor-divider {
+      width: 100%;
+      height: 1px;
+      margin: var(--spacing-xs) 0;
     }
 
-    .encoder-actions {
-      justify-content: center;
+    .divider-arrow {
+      transform: rotate(90deg);
     }
 
-    .footer-inner {
-      flex-direction: column;
-      gap: var(--spacing-sm);
-      text-align: center;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .hero-title {
-      font-size: 2rem;
+    .editor-textarea {
+      min-height: 200px;
     }
 
-    .hero-features {
-      flex-direction: column;
-      align-items: center;
-    }
-
-    .code-grid {
+    .features-grid {
       grid-template-columns: 1fr;
+    }
+
+    .cli-tabs {
+      flex-direction: column;
+    }
+
+    .cli-tab {
+      border-bottom: 1px solid var(--color-border);
+      border-left: 2px solid transparent;
+    }
+
+    .cli-tab.active {
+      border-bottom-color: var(--color-border);
+      border-left-color: var(--color-primary);
     }
   }
 </style>
