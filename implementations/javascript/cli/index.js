@@ -8,7 +8,7 @@
  * @license MIT
  */
 
-const { dxEncode, dxDecode, isDxEncoded, getDxInfo } = require("dxcode");
+const { dxEncode, dxDecode, isDxEncoded, getDxInfo } = require("dxcode-lib");
 const fs = require("fs");
 const path = require("path");
 

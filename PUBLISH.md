@@ -1,6 +1,6 @@
-# 📦 DXCode 发布教程
+# 📦 dxcode 发布教程
 
-本文档详细介绍如何将 DXCode 发布到各个包管理平台。
+本文档详细介绍如何将 dxcode 发布到各个包管理平台。
 
 ---
 
@@ -124,12 +124,12 @@ cat package.json
     "dxc": "./index.js"
   },
   "dependencies": {
-    "dxcode": "^1.0.0"
+    "dxcode-lib": "^1.0.0"
   }
 }
 ```
 
-**注意**：CLI 依赖主库 `dxcode`，所以需要先发布主库！
+**注意**：CLI 依赖主库 `dxcode-lib`，所以需要先发布主库！
 
 ### 3. 发布顺序
 
@@ -638,7 +638,7 @@ curl -fsSL https://raw.githubusercontent.com/dogxiii/dxcode/main/install.sh | sh
 brew install dogxi/tap/dxcode-cli
 
 # JavaScript 库
-npm install dxcode
+npm install dxcode-lib
 
 # Python
 pip install dxcode

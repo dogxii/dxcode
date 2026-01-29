@@ -28,7 +28,7 @@ class DxcodeCli < Formula
 
   def caveats
     <<~EOS
-      DXCode CLI 已安装成功!
+      dxcode CLI 已安装成功!
 
       使用方法:
         dxc encode "Hello World"    # 编码

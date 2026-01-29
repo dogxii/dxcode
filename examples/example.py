@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DXCode 使用示例
+dxcode 使用示例
 由 Dogxi 创建
 
 这个文件展示了如何使用 DX 编码库进行各种编码和解码操作。

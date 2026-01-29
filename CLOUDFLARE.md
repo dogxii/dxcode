@@ -1,6 +1,6 @@
 # Cloudflare 托管 install.sh 指南
 
-本文档介绍如何使用 Cloudflare 托管 `install.sh` 脚本，使用户可以通过 `curl -fsSL https://dxc.dogxi.me/install.sh | sh` 安装 DXCode CLI。
+本文档介绍如何使用 Cloudflare 托管 `install.sh` 脚本，使用户可以通过 `curl -fsSL https://dxc.dogxi.me/install.sh | sh` 安装 dxcode CLI。
 
 ---
 
@@ -59,14 +59,14 @@ curl -fsSL https://dxc.dogxi.me/install.sh | sh
 
 ```javascript
 // Cloudflare Worker: dxcode-install
-// 托管 DXCode CLI 安装脚本
+// 托管 dxcode CLI 安装脚本
 
 const GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/dogxii/dxcode/main/install.sh'
 
 // 也可以直接内嵌脚本内容
 const INSTALL_SCRIPT = `#!/bin/sh
-# DXCode CLI 安装脚本
+# dxcode CLI 安装脚本
 # 由 Dogxi 创建
 #
 # 使用方法:

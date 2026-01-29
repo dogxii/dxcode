@@ -1,4 +1,4 @@
-# DXCode 编码算法
+# dxcode 编码算法
 
 <p align="center">
   <img src="https://img.shields.io/badge/算法-DX-black?style=for-the-badge" alt="DX Algorithm">
@@ -51,7 +51,7 @@ dxc --help                  # 查看帮助
 ### JavaScript / TypeScript
 
 ```bash
-npm install dxcode
+npm install dxcode-lib
 ```
 
 ### Python

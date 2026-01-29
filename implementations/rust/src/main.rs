@@ -1,4 +1,4 @@
-//! DXCode 命令行工具
+//! dxcode 命令行工具
 //!
 //! 由 Dogxi 创建
 
@@ -8,7 +8,7 @@ use std::io::{self, BufRead, Read, Write};
 use std::process;
 
 fn print_help() {
-    println!("DXCode - 由 Dogxi 创造的独特编码算法");
+    println!("dxcode - 由 Dogxi 创造的独特编码算法");
     println!();
     println!("用法:");
     println!("  dxc encode <文本>     编码文本");
@@ -32,7 +32,7 @@ fn print_help() {
 fn print_info() {
     let info = get_info();
     println!("╔════════════════════════════════════════════╗");
-    println!("║             DXCode 信息                    ║");
+    println!("║             dxcode 信息                    ║");
     println!("╚════════════════════════════════════════════╝");
     println!();
     println!("名称:     {}", info.name);

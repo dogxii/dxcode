@@ -1,5 +1,5 @@
 #!/bin/sh
-# DXCode CLI 安装脚本
+# dxcode CLI 安装脚本
 # 由 Dogxi 创建
 #
 # 使用方法:
@@ -31,7 +31,7 @@ print_banner() {
 
 EOF
     printf "${NC}"
-    printf "${CYAN}DXCode CLI Installer${NC}\n"
+    printf "${CYAN}dxcode CLI Installer${NC}\n"
     printf "https://dxc.dogxi.me\n\n"
 }
 

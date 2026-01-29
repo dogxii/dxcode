@@ -580,10 +580,10 @@
         <div class="code-card card">
           <div class="code-header">
             <span class="code-lang">JavaScript</span>
-            <code class="code-install">npm i dxcode</code>
+            <code class="code-install">npm i dxcode-lib</code>
           </div>
           <pre><code
-              >{`import { dxEncode, dxDecode } from 'dxcode'
+              >{`import { dxEncode, dxDecode } from 'dxcode-lib'
 
 const encoded = dxEncode('Hello, Dogxi!')
 console.log(encoded)  // dx...

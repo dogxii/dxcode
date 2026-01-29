@@ -1,4 +1,4 @@
-//! DXCode - 由 Dogxi 创造的独特编码算法
+//! dxcode - 由 Dogxi 创造的独特编码算法
 //!
 //! Rust 实现
 //!

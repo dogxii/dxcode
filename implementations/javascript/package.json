@@ -1,5 +1,5 @@
 {
-	"name": "dxcode",
+	"name": "dxcode-lib",
 	"version": "1.0.0",
 	"description": "[dxcode] A distinctive, URL‑safe binary encoder with the signature `dx` prefix.",
 	"author": "Dogxi",

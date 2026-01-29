@@ -1,7 +1,7 @@
 {
 	"name": "dxc-dogxi-me",
 	"version": "1.0.0",
-	"description": "DXCode 编码在线工具 - 由 Dogxi 创造",
+	"description": "dxcode 编码在线工具 - 由 Dogxi 创造",
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",

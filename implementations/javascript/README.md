@@ -1,19 +1,19 @@
-# DXCode - JavaScript/TypeScript 实现
+# dxcode - JavaScript/TypeScript 实现
 
 由 Dogxi 创造的独特编码算法的 JavaScript/TypeScript 实现。
 
 ## 安装
 
 ```bash
-npm install dxcode
+npm install dxcode-lib
 ```
 
 或使用其他包管理器：
 
 ```bash
-yarn add dxcode
-pnpm add dxcode
-bun add dxcode
+yarn add dxcode-lib
+pnpm add dxcode-lib
+bun add dxcode-lib
 ```
 
 ## 使用方法
@@ -21,7 +21,7 @@ bun add dxcode
 ### ES Modules
 
 ```javascript
-import { dxEncode, dxDecode, isDxEncoded } from 'dxcode'
+import { dxEncode, dxDecode, isDxEncoded } from 'dxcode-lib'
 
 // 编码
 const encoded = dxEncode('你好，Dogxi！')
@@ -39,7 +39,7 @@ console.log(isDxEncoded('hello')) // false
 ### CommonJS
 
 ```javascript
-const { dxEncode, dxDecode, isDxEncoded } = require('dxcode')
+const { dxEncode, dxDecode, isDxEncoded } = require('dxcode-lib')
 
 // 编码
 const encoded = dxEncode('Hello, World!')
@@ -53,7 +53,7 @@ console.log(decoded)
 ### TypeScript
 
 ```typescript
-import { dxEncode, dxDecode, isDxEncoded } from 'dxcode'
+import { dxEncode, dxDecode, isDxEncoded } from 'dxcode-lib'
 
 const message: string = '这是一条秘密消息'
 const encoded: string = dxEncode(message)
@@ -66,7 +66,7 @@ console.log(decoded)
 ### 编码字节数组
 
 ```javascript
-import { dxEncode, dxDecode } from 'dxcode'
+import { dxEncode, dxDecode } from 'dxcode-lib'
 
 // 编码字节数组
 const bytes = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f])
@@ -124,7 +124,7 @@ console.log(decodedBytes) // Uint8Array [72, 101, 108, 108, 111]
 
 ```html
 <script type="module">
-  import { dxEncode, dxDecode } from './dx-encoding.js'
+  import { dxEncode, dxDecode } from './dxcode.js'
 
   const encoded = dxEncode('Hello from browser!')
   document.body.textContent = encoded
@@ -134,7 +134,7 @@ console.log(decodedBytes) // Uint8Array [72, 101, 108, 108, 111]
 ## 错误处理
 
 ```javascript
-import { dxDecode } from 'dxcode'
+import { dxDecode } from 'dxcode-lib'
 
 try {
   dxDecode('invalid-string')

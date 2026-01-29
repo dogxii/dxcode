@@ -1,4 +1,4 @@
-# DXCode - Go 实现
+# dxcode - Go 实现
 
 由 Dogxi 创造的独特编码算法的 Go 实现。
 

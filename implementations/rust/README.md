@@ -1,4 +1,4 @@
-# DXCode - Rust 实现
+# dxcode - Rust 实现
 
 由 Dogxi 创造的独特编码算法的 Rust 实现。
 

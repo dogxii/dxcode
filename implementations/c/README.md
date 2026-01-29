@@ -1,4 +1,4 @@
-# DXCode - C 实现
+# dxcode - C 实现
 
 由 Dogxi 创造的独特编码算法的 C 语言实现。
 
@@ -297,7 +297,7 @@ size_t dx_decode_length(size_t encoded_len);
 int main() {
     // 获取编码信息
     dx_info_t info = dx_get_info();
-    printf("DXCode v%s by %s\n\n", info.version, info.author);
+    printf("dxcode v%s by %s\n\n", info.version, info.author);
 
     // 测试编码解码
     const char *test_strings[] = {

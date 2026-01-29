@@ -1,5 +1,5 @@
 /**
- * DXCode 使用示例
+ * dxcode 使用示例
  * 由 Dogxi 创建
  *
  * 运行方法: node example.js

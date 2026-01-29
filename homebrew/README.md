@@ -1,6 +1,6 @@
-# Homebrew Tap for DXCode CLI
+# Homebrew Tap for dxcode CLI
 
-这是 DXCode CLI 的 Homebrew tap 仓库配置。
+这是 dxcode CLI 的 Homebrew tap 仓库配置。
 
 ## 安装方法
 

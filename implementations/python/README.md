@@ -1,4 +1,4 @@
-# DXCode - Python 实现
+# dxcode - Python 实现
 
 由 Dogxi 创造的独特编码算法的 Python 实现。
 
