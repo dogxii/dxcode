@@ -165,7 +165,7 @@
     decodedTtlInfo = null
   }
 
-  let toastMessage = ''
+  let toastMessage = $state('')
   let toastTimer: ReturnType<typeof setTimeout>
 
   function showToast(msg: string) {
@@ -201,43 +201,6 @@
 <div class="grid-bg"></div>
 
 <div class="page">
-  <header class="header">
-    <div class="container header-inner">
-      <a href="/" class="logo">
-        <span class="logo-text">dxc</span>
-        <span class="logo-dot">.</span>
-        <span class="logo-domain">dogxi.me</span>
-      </a>
-
-      <nav class="nav">
-        <a
-          href="https://github.com/dogxii/dxcode"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="nav-link"
-        >
-          GitHub
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path
-              d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"
-            />
-            <path d="M9 18c-4.51 2-5-2-7-2" />
-          </svg>
-        </a>
-      </nav>
-    </div>
-  </header>
-
   <main>
     <section class="hero">
       <div class="container text-center">
@@ -533,7 +496,8 @@
       </div>
     </section>
 
-    <!-- 特性介绍 -->
+    <!-- Benchmark / Scenarios Section -->
+
     <section class="features-section">
       <div class="container">
         <div class="features-grid">
@@ -959,19 +923,6 @@ fn main() {
     </section>
   </main>
 
-  <footer class="footer">
-    <div class="container footer-inner">
-      <div class="footer-left">
-        <span class="footer-copy"
-          >© 2026 <a href="https://blog.dogxi.me">Dogxi</a>. MIT License.</span
-        >
-      </div>
-      <div class="footer-right">
-        <a href="https://github.com/dogxii/dxcode" target="_blank">GitHub</a>
-      </div>
-    </div>
-  </footer>
-
   {#if toastMessage}
     <div class="toast-container" transition:fade>
       <div class="toast">
@@ -994,50 +945,6 @@ fn main() {
   }
 
   /* Header */
-  .header {
-    padding: var(--spacing-md) 0;
-    /* backdrop-filter: blur(8px); */
-  }
-
-  .header-inner {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .logo {
-    font-weight: 700;
-    font-size: 1.25rem;
-    display: flex;
-    align-items: baseline;
-    gap: 2px;
-  }
-
-  .logo-text {
-    letter-spacing: -0.02em;
-  }
-
-  .logo-dot {
-    color: var(--color-text-tertiary);
-  }
-
-  .logo-domain {
-    color: var(--color-text-secondary);
-    font-size: 1rem;
-    font-weight: 500;
-  }
-
-  .nav-link {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-sm);
-    font-size: 0.875rem;
-    color: var(--color-text-secondary);
-  }
-
-  .nav-link:hover {
-    color: var(--color-text);
-  }
 
   /* Hero */
   .hero {
@@ -1306,7 +1213,6 @@ fn main() {
   .cli-tab.active {
     color: var(--color-text);
     border-bottom-color: var(--color-primary);
-    background: var(--color-bg-card);
   }
 
   .cli-content {
@@ -1466,23 +1372,6 @@ fn main() {
   }
 
   /* Footer */
-  .footer {
-    padding: var(--spacing-xl) 0;
-    border-top: 1px solid var(--color-border);
-    margin-top: auto;
-  }
-
-  .footer-inner {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.875rem;
-    color: var(--color-text-tertiary);
-  }
-
-  .footer-right a:hover {
-    text-decoration: underline;
-  }
 
   /* Responsive */
   .action-divider {
