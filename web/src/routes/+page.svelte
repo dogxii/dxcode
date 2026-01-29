@@ -275,30 +275,27 @@
                   />
                   <span class="ttl-label">TTL</span>
                 </label>
-                {#if enableTtl}
-                  <div
-                    class="ttl-input-group"
-                    transition:slide={{ duration: 150 }}
+                <div class="ttl-input-group" class:ttl-hidden={!enableTtl}>
+                  <input
+                    type="number"
+                    class="ttl-input"
+                    bind:value={ttlValue}
+                    min="1"
+                    onchange={handleTtlToggle}
+                    disabled={!enableTtl}
+                  />
+                  <select
+                    class="ttl-select"
+                    bind:value={ttlUnit}
+                    onchange={handleTtlToggle}
+                    disabled={!enableTtl}
                   >
-                    <input
-                      type="number"
-                      class="ttl-input"
-                      bind:value={ttlValue}
-                      min="1"
-                      onchange={handleTtlToggle}
-                    />
-                    <select
-                      class="ttl-select"
-                      bind:value={ttlUnit}
-                      onchange={handleTtlToggle}
-                    >
-                      <option value="seconds">秒</option>
-                      <option value="minutes">分钟</option>
-                      <option value="hours">小时</option>
-                      <option value="days">天</option>
-                    </select>
-                  </div>
-                {/if}
+                    <option value="seconds">秒</option>
+                    <option value="minutes">分钟</option>
+                    <option value="hours">小时</option>
+                    <option value="days">天</option>
+                  </select>
+                </div>
               </div>
               <button
                 class="btn btn-ghost btn-sm"
@@ -1349,6 +1346,12 @@ fn main() {
     display: flex;
     align-items: center;
     gap: 4px;
+    transition: opacity 0.15s ease;
+  }
+
+  .ttl-input-group.ttl-hidden {
+    opacity: 0;
+    pointer-events: none;
   }
 
   .ttl-input {
@@ -1452,13 +1455,7 @@ fn main() {
     }
 
     .ttl-options {
-      flex-wrap: wrap;
       margin-right: var(--spacing-sm);
-    }
-
-    .ttl-input-group {
-      width: 100%;
-      margin-top: var(--spacing-xs);
     }
 
     .cli-tabs {
