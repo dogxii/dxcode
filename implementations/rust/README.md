@@ -1,6 +1,6 @@
 # dxcode - Rust 实现
 
-由 Dogxi 创造的独特编码算法的 Rust 实现。
+带有 `dx` 前缀的自定义编码算法的 Rust 实现。
 
 ## 安装
 

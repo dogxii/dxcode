@@ -8,7 +8,7 @@ use std::io::{self, BufRead, Read, Write};
 use std::process;
 
 fn print_help() {
-    println!("dxcode - 由 Dogxi 创造的独特编码算法");
+    println!("dxcode - 带有 `dx` 前缀的自定义编码算法");
     println!();
     println!("用法:");
     println!("  dxc encode <文本>     编码文本");

@@ -1,5 +1,5 @@
 """
-dxcode - 由 Dogxi 创造的独特编码算法
+dxcode - 带有 `dx` 前缀的自定义编码算法
 Python 包安装配置
 """
 

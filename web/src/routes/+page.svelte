@@ -84,7 +84,7 @@
 
 <svelte:head>
   <title>DX Encoding | dxc.dogxi.me</title>
-  <meta name="description" content="DX 编码 - 由 Dogxi 创造的独特编码算法" />
+  <meta name="description" content="DX 编码 - 带有 `dx` 前缀的自定义编码算法" />
 </svelte:head>
 
 <!-- 网格背景 -->
