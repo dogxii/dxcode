@@ -21,7 +21,7 @@ pip install -e .
 ### 基本使用
 
 ```python
-from dx_encoding import dx_encode, dx_decode, is_dx_encoded
+from dxcode import dx_encode, dx_decode, is_dx_encoded
 
 # 编码字符串
 encoded = dx_encode('你好，Dogxi！')
@@ -39,7 +39,7 @@ print(is_dx_encoded('hello'))   # False
 ### 编码字节数据
 
 ```python
-from dx_encoding import dx_encode, dx_decode
+from dxcode import dx_encode, dx_decode
 
 # 编码字节
 data = b'\x00\x01\x02\xfe\xff'
@@ -54,7 +54,7 @@ print(decoded)  # b'\x00\x01\x02\xfe\xff'
 ### 处理文件
 
 ```python
-from dx_encoding import dx_encode, dx_decode
+from dxcode import dx_encode, dx_decode
 
 # 编码文件内容
 with open('secret.txt', 'rb') as f:
@@ -140,7 +140,7 @@ dx_decode('dxXXXX...', as_bytes=True)     # 返回字节
 ## 常量
 
 ```python
-from dx_encoding import DX_CHARSET, DX_PREFIX, DX_MAGIC, DX_PADDING
+from dxcode import DX_CHARSET, DX_PREFIX, DX_MAGIC, DX_PADDING
 
 print(DX_CHARSET)  # DX 字符集
 print(DX_PREFIX)   # 'dx'
@@ -167,7 +167,7 @@ dx-decode "dxXXXX..."
 ## 异常处理
 
 ```python
-from dx_encoding import dx_decode, DxEncodingError
+from dxcode import dx_decode, DxEncodingError
 
 try:
     dx_decode('invalid-string')

@@ -599,7 +599,7 @@ console.log(decoded)  // Hello, Dogxi!`}</code
             <code class="code-install">pip install dxcode</code>
           </div>
           <pre><code
-              >{`from dx_encoding import dx_encode, dx_decode
+              >{`from dxcode import dx_encode, dx_decode
 
 encoded = dx_encode('Hello, Dogxi!')
 print(encoded)  # dx...

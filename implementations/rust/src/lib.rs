@@ -99,7 +99,7 @@ pub type Result<T> = std::result::Result<T, DxError>;
 /// # 示例
 ///
 /// ```
-/// use dx_encoding::encode;
+/// use dxcode::encode;
 ///
 /// let encoded = encode(b"Hello, Dogxi!");
 /// assert!(encoded.starts_with("dx"));
@@ -159,7 +159,7 @@ pub fn encode(data: &[u8]) -> String {
 /// # 示例
 ///
 /// ```
-/// use dx_encoding::encode_str;
+/// use dxcode::encode_str;
 ///
 /// let encoded = encode_str("你好，Dogxi！");
 /// assert!(encoded.starts_with("dx"));
@@ -181,7 +181,7 @@ pub fn encode_str(s: &str) -> String {
 /// # 示例
 ///
 /// ```
-/// use dx_encoding::{encode, decode};
+/// use dxcode::{encode, decode};
 ///
 /// let encoded = encode(b"Hello");
 /// let decoded = decode(&encoded).unwrap();
@@ -290,7 +290,7 @@ pub fn decode(encoded: &str) -> Result<Vec<u8>> {
 /// # 示例
 ///
 /// ```
-/// use dx_encoding::{encode_str, decode_str};
+/// use dxcode::{encode_str, decode_str};
 ///
 /// let encoded = encode_str("你好，Dogxi！");
 /// let decoded = decode_str(&encoded).unwrap();
@@ -314,7 +314,7 @@ pub fn decode_str(encoded: &str) -> Result<String> {
 /// # 示例
 ///
 /// ```
-/// use dx_encoding::{encode_str, is_encoded};
+/// use dxcode::{encode_str, is_encoded};
 ///
 /// let encoded = encode_str("Hello");
 /// assert!(is_encoded(&encoded));
@@ -370,7 +370,7 @@ pub struct Info {
 /// # 示例
 ///
 /// ```
-/// use dx_encoding::get_info;
+/// use dxcode::get_info;
 ///
 /// let info = get_info();
 /// println!("名称: {}", info.name);

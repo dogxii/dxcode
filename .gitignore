@@ -86,7 +86,7 @@ implementations/go/go.sum
 # C
 implementations/c/*.o
 implementations/c/*.exe
-implementations/c/dx_encoding
+implementations/c/dxcode
 
 # 临时文件
 *.tmp
