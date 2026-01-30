@@ -27,6 +27,7 @@
   let copiedPlain = $state(false)
   let copiedDx = $state(false)
   let copiedCli = $state(false)
+  let copiedShareLink = $state(false)
 
   // 正在编辑的一侧，防止循环更新
   let activeSide = $state<'plain' | 'dx' | null>(null)
@@ -174,6 +175,40 @@
     toastTimer = setTimeout(() => {
       toastMessage = ''
     }, 3000)
+  }
+
+  // 生成分享链接
+  function generateShareLink(): string {
+    if (!dxText) return ''
+    const baseUrl =
+      typeof window !== 'undefined'
+        ? window.location.origin
+        : 'https://dxc.dogxi.me'
+    return `${baseUrl}/view?d=${encodeURIComponent(dxText)}`
+  }
+
+  // 复制分享链接
+  async function copyShareLink() {
+    const link = generateShareLink()
+    if (!link) return
+
+    try {
+      await navigator.clipboard.writeText(link)
+      copiedShareLink = true
+      showToast('分享链接已复制')
+      setTimeout(() => (copiedShareLink = false), 2000)
+    } catch {
+      error = '复制失败'
+      showToast('复制失败')
+    }
+  }
+
+  // 在新标签页打开分享预览
+  function openSharePreview() {
+    const link = generateShareLink()
+    if (link) {
+      window.open(link, '_blank')
+    }
   }
 
   // TTL 开关变化时重新编码
@@ -436,6 +471,74 @@
                   {#if error}
                     <span class="error-badge" transition:fade>{error}</span>
                   {/if}
+                  <!-- 分享按钮 -->
+                  <button
+                    class="copy-btn-icon share-btn"
+                    onclick={copyShareLink}
+                    title="复制分享链接"
+                    disabled={!dxText}
+                  >
+                    {#if copiedShareLink}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        class="text-success"><path d="M20 6 9 17l-5-5" /></svg
+                      >
+                    {:else}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path
+                          d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+                        />
+                        <path
+                          d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+                        />
+                      </svg>
+                    {/if}
+                  </button>
+                  <!-- 预览按钮 -->
+                  <button
+                    class="copy-btn-icon"
+                    onclick={openSharePreview}
+                    title="在新窗口预览分享"
+                    disabled={!dxText}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                      />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                  </button>
+                  <div class="action-divider"></div>
+                  <!-- 复制按钮 -->
                   <button
                     class="copy-btn-icon"
                     onclick={() => copyText(dxText, 'dx')}
@@ -1079,6 +1182,14 @@ fn main() {
   .copy-btn-icon:disabled {
     opacity: 0.3;
     cursor: not-allowed;
+  }
+
+  .share-btn {
+    position: relative;
+  }
+
+  .share-btn:not(:disabled):hover {
+    color: var(--color-success);
   }
 
   .editor-textarea {
