@@ -1690,5 +1690,18 @@ fn main() {
       border-bottom-color: var(--color-border);
       border-left-color: var(--color-primary);
     }
+
+    /* 让移动端输入框文字为 16px（并阻止 iOS 的自动缩放） */
+    .editor-textarea,
+    .ttl-input,
+    .ttl-select,
+    textarea,
+    input[type='text'],
+    input[type='number'],
+    input[type='search'],
+    select {
+      font-size: 16px !important;
+      -webkit-text-size-adjust: 100%;
+    }
   }
 </style>
