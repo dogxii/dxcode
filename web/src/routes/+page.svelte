@@ -1223,7 +1223,7 @@ fn main() {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: #000;
+    background: var(--color-bg);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: var(--spacing-md);
